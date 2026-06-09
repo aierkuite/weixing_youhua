@@ -889,6 +889,13 @@ typedef struct {        /* solution status buffer type */
     solstat_t *data;    /* solution status data */
 } solstatbuf_t;
 
+typedef enum {          /* 观测诊断决策类型 */
+    RTKDIAG_USE=0,      /* 使用观测值 */
+    RTKDIAG_DOWNWEIGHT, /* 降权观测值 */
+    RTKDIAG_REJECT,     /* 剔除观测值 */
+    RTKDIAG_SLIP_RISK   /* 周跳风险 */
+} rtkdiagdec_t;
+
 typedef struct {        /* RTCM control struct type */
     int staid;          /* station id */
     int stah;           /* station health */
@@ -1714,6 +1721,8 @@ EXPORT int  rtkpos (rtk_t *rtk, const obsd_t *obs, int nobs, const nav_t *nav);
 EXPORT int  rtkopenstat(const char *file, int level);
 EXPORT void rtkclosestat(void);
 EXPORT int  rtkoutstat(rtk_t *rtk, char *buff);
+EXPORT int  rtkopendiag(const char *dir);
+EXPORT void rtkclosediag(void);
 
 /* precise point positioning -------------------------------------------------*/
 EXPORT void pppos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav);

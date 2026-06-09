@@ -70,7 +70,8 @@ static const char *help[]={
 " -l lat lon hgt reference (base) receiver latitude/longitude/height (deg/m)",
 "           rover latitude/longitude/height for fixed or ppp-fixed mode",
 " -y level  output soltion status (0:off,1:states,2:residuals) [0]",
-" -x level  debug trace level (0:off) [0]"
+" -x level  debug trace level (0:off) [0]",
+" --diag dir output observation quality diagnostic CSV files [off]"
 };
 /* show message --------------------------------------------------------------*/
 extern int showmsg(const char *format, ...)
@@ -99,7 +100,7 @@ int main(int argc, char **argv)
     gtime_t ts={0},te={0};
     double tint=0.0,es[]={2000,1,1,0,0,0},ee[]={2000,12,31,23,59,59},pos[3];
     int i,j,n,ret;
-    char *infile[MAXFILE],*outfile="",*p;
+    char *infile[MAXFILE],*outfile="",*diagdir="",*p;
     
     prcopt.mode  =PMODE_KINEMA;
     prcopt.navsys=0;
@@ -174,6 +175,7 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(argv[i],"-y")&&i+1<argc) solopt.sstat=atoi(argv[++i]);
         else if (!strcmp(argv[i],"-x")&&i+1<argc) solopt.trace=atoi(argv[++i]);
+        else if (!strcmp(argv[i],"--diag")&&i+1<argc) diagdir=argv[++i];
         else if (*argv[i]=='-') printhelp();
         else if (n<MAXFILE) infile[n++]=argv[i];
     }
@@ -184,7 +186,12 @@ int main(int argc, char **argv)
         showmsg("error : no input file");
         return -2;
     }
+    if (*diagdir&&!rtkopendiag(diagdir)) {
+        showmsg("error : diagnostic output open error");
+        return -3;
+    }
     ret=postpos(ts,te,tint,0.0,&prcopt,&solopt,&filopt,infile,n,outfile,"","");
+    rtkclosediag();
     
     if (!ret) fprintf(stderr,"%40s\r","");
     return ret;

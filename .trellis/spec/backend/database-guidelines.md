@@ -57,6 +57,59 @@ Generated runtime files should remain outside the checked-in source tree unless 
 
 For command-line app changes, prefer writing deterministic outputs that can be compared by tests. `app/consapp/rnx2rtkp/gcc/makefile` already contains test targets that generate `test*.pos` files from known fixtures.
 
+## Scenario: RTK observation diagnostics
+
+### 1. Scope / Trigger
+- Trigger: a new command-line option and core API were added to emit observation diagnostics
+- The feature writes deterministic CSV files that are consumed as runtime output, so the file contract must be explicit
+
+### 2. Signatures
+- CLI option: `rnx2rtkp --diag <dir> ...`
+- Core API: `int rtkopendiag(const char *dir)` and `void rtkclosediag(void)`
+- Output files: `<dir>/epoch_diag.csv` and `<dir>/sat_diag.csv`
+
+### 3. Contracts
+- `--diag` is optional and must not change default output when omitted
+- `rtkopendiag()` must create the output directory if needed, then open both CSV files for writing
+- `epoch_diag.csv` header:
+  `time,stat,ns,ratio,gdop,n_slip,n_reject,n_downweight,n_low_snr,n_low_el,n_res_outlier`
+- `sat_diag.csv` header:
+  `time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason`
+- `quality_score` must remain in the inclusive range 0..100
+- `decision` must be one of `use`, `downweight`, `reject`, or `slip_risk`
+
+### 4. Validation & Error Matrix
+- Missing `dir` or empty `dir` -> `rtkopendiag()` returns 0
+- Unable to create the directory or open either CSV -> `rtkopendiag()` returns 0
+- `--diag` omitted -> no diagnostic files are created
+- `rtkclosediag()` may be called more than once and must remain safe
+
+### 5. Good/Base/Bad Cases
+- Good: `--diag diag_out` creates both CSV files and writes one row per processed epoch/satellite
+- Base: no `--diag` keeps the original `.pos` and trace behavior
+- Bad: changing the CSV header order or allowing scores outside 0..100
+
+### 6. Tests Required
+- Run `rnx2rtkp --diag <dir> ...` on a known fixture and assert both CSVs exist
+- Parse both CSVs and assert header order, non-empty rows, valid `decision` values, and `quality_score` range
+- Run the same input without `--diag` and assert no diagnostic files are created
+
+### 7. Wrong vs Correct
+#### Wrong
+```c
+if (diagdir) {
+    fopen("epoch_diag.csv", "w");
+    fopen("sat_diag.csv", "w");
+}
+```
+#### Correct
+```c
+if (*diagdir && rtkopendiag(diagdir)) {
+    ret = postpos(...);
+    rtkclosediag();
+}
+```
+
 ---
 
 ## Common Mistakes

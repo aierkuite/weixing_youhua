@@ -72,6 +72,14 @@
 
 #define TTOL_MOVEB  (1.0+2*DTTOL)
                              /* time sync tolerance for moving-baseline (s) */
+#define DIAG_SCORE_LOWEL 15.0 /* 低高度角评分阈值 */
+#define DIAG_SCORE_LOWSNR 35.0 /* 低信噪比评分阈值 */
+#define DIAG_PHASE_RES 0.08  /* 载波相位残差评分尺度 */
+#define DIAG_CODE_RES 5.0    /* 伪距残差评分尺度 */
+#define DIAG_LIGHT_SIGMA 3.0 /* 轻度残差异常阈值 */
+#define DIAG_HEAVY_SIGMA 6.0 /* 严重残差异常阈值 */
+#define DIAG_DOWNWEIGHT_FACTOR 9.0 /* 降权方差放大系数 */
+#define DIAG_REJECT_FACTOR 1E6 /* 软剔除方差放大系数 */
 
 /* number of parameters (pos,ionos,tropos,hw-bias,phase-bias,real,estimated) */
 #define NF(opt)     ((opt)->ionoopt==IONOOPT_IFLC?1:(opt)->nf)
@@ -94,6 +102,299 @@ static int statlevel=0;          /* rtk status output level (0:off) */
 static FILE *fp_stat=NULL;       /* rtk status file pointer */
 static char file_stat[1024]="";  /* rtk status file original path */
 static gtime_t time_stat={0};    /* rtk status file time */
+static FILE *fp_diag_epoch=NULL;  /* 历元诊断文件指针 */
+static FILE *fp_diag_sat=NULL;    /* 卫星诊断文件指针 */
+static int diag_enabled=0;        /* 诊断输出开关 */
+static int diag_decision[MAXSAT][NFREQ]; /* 诊断决策 */
+static int diag_score[MAXSAT][NFREQ]; /* 观测质量评分 */
+static char diag_reason[MAXSAT][NFREQ][64]; /* 诊断原因 */
+static int diag_resout[MAXSAT][NFREQ]; /* 残差异常标志 */
+
+/* 拷贝诊断原因字符串 ----------------------------------------------------------
+* 拷贝诊断原因字符串
+* args   : char   *dst      O   目标原因缓冲区
+*          char   *reason   I   原因字符串
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void setdiagreason(char *dst, const char *reason)
+{
+    if (dst==reason) return;
+    strncpy(dst,reason,63);
+    dst[63]='\0';
+}
+/* 重置历元诊断缓存 ------------------------------------------------------------
+* 重置当前历元诊断缓存
+* args   : none
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void resetdiag(void)
+{
+    int i,j;
+
+    for (i=0;i<MAXSAT;i++) for (j=0;j<NFREQ;j++) {
+        diag_decision[i][j]=RTKDIAG_USE;
+        diag_score[i][j]=100;
+        setdiagreason(diag_reason[i][j],"nominal");
+        diag_resout[i][j]=0;
+    }
+}
+/* 生成诊断输出路径 ------------------------------------------------------------
+* 生成诊断输出文件路径
+* args   : char   *path     O   输出完整文件路径
+*          char   *dir      I   诊断目录
+*          char   *name     I   诊断文件名
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void joindiagpath(char *path, const char *dir, const char *name)
+{
+    size_t n=strlen(dir);
+    size_t i;
+
+    strcpy(path,dir);
+    for (i=0;i<n;i++) {
+        if (path[i]=='/'||path[i]=='\\') path[i]=FILEPATHSEP;
+    }
+    if (n>0&&(dir[n-1]==FILEPATHSEP||dir[n-1]=='/'||dir[n-1]=='\\')) {
+        path[n-1]=FILEPATHSEP;
+    }
+    else if (n>0) {
+        sprintf(path+n,"%c",FILEPATHSEP);
+    }
+    strcat(path,name);
+}
+/* 获取卫星系统标签 ------------------------------------------------------------
+* 获取卫星系统标签
+* args   : int    sys       I   卫星系统掩码
+* return : 卫星系统字符串
+*-----------------------------------------------------------------------------*/
+static const char *diagsys(int sys)
+{
+    if (sys&SYS_GPS) return "GPS";
+    if (sys&SYS_GLO) return "GLO";
+    if (sys&SYS_GAL) return "GAL";
+    if (sys&SYS_QZS) return "QZS";
+    if (sys&SYS_CMP) return "BDS";
+    if (sys&SYS_IRN) return "IRN";
+    if (sys&SYS_SBS) return "SBS";
+    if (sys&SYS_LEO) return "LEO";
+    return "UNK";
+}
+/* 获取诊断决策标签 ------------------------------------------------------------
+* 获取诊断决策字符串
+* args   : int    decision  I   诊断决策枚举值
+* return : 诊断决策字符串
+*-----------------------------------------------------------------------------*/
+static const char *diagdecisionstr(int decision)
+{
+    switch (decision) {
+        case RTKDIAG_DOWNWEIGHT: return "downweight";
+        case RTKDIAG_REJECT    : return "reject";
+        case RTKDIAG_SLIP_RISK : return "slip_risk";
+    }
+    return "use";
+}
+/* 限制诊断评分范围 ------------------------------------------------------------
+* 限制观测质量评分范围
+* args   : int    score     I   原始评分
+* return : 0到100之间的评分
+*-----------------------------------------------------------------------------*/
+static int clampdiagscore(int score)
+{
+    if (score<0) return 0;
+    if (score>100) return 100;
+    return score;
+}
+/* 比较双精度数值 --------------------------------------------------------------
+* 比较两个双精度数值供qsort排序使用
+* args   : void   *a        I   第一个双精度数值指针
+*          void   *b        I   第二个双精度数值指针
+* return : 小于0表示a<b，大于0表示a>b，0表示相等
+*-----------------------------------------------------------------------------*/
+static int cmpdouble(const void *a, const void *b)
+{
+    double x=*(const double *)a,y=*(const double *)b;
+
+    return x<y?-1:(x>y?1:0);
+}
+/* 计算中位数 ------------------------------------------------------------------
+* 计算双精度数组中位数
+* args   : double *data     IO  输入数组并在函数内排序
+*          int    n         I   数组元素数量
+* return : 中位数，n<=0时返回0
+*-----------------------------------------------------------------------------*/
+static double median(double *data, int n)
+{
+    if (n<=0) return 0.0;
+    qsort(data,n,sizeof(double),cmpdouble);
+    return n%2?data[n/2]:(data[n/2-1]+data[n/2])*0.5;
+}
+/* 标记诊断决策 ----------------------------------------------------------------
+* 按优先级更新观测诊断决策
+* args   : int    sat       I   卫星号
+*          int    freq      I   频点索引
+*          int    decision  I   新诊断决策
+*          char   *reason   I   新诊断原因
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void markdiag(int sat, int freq, int decision, const char *reason)
+{
+    int i=sat-1;
+
+    if (i<0||i>=MAXSAT||freq<0||freq>=NFREQ) return;
+    if (decision<diag_decision[i][freq]) return;
+    if (decision==diag_decision[i][freq]&&strcmp(diag_reason[i][freq],"nominal")) {
+        return;
+    }
+    diag_decision[i][freq]=decision;
+    setdiagreason(diag_reason[i][freq],reason);
+}
+/* 计算观测质量评分 ------------------------------------------------------------
+* 计算单颗卫星单频点观测质量评分
+* args   : ssat_t *ssat     I   卫星状态
+*          int    freq      I   频点索引
+*          prcopt_t *opt    I   处理选项
+* return : 0到100之间的质量评分
+*-----------------------------------------------------------------------------*/
+static int qualityscore(const ssat_t *ssat, int freq, const prcopt_t *opt)
+{
+    double el=ssat->azel[1]*R2D,snr=ssat->snr[freq]*SNR_UNIT;
+    double resp=fabs(ssat->resp[freq]),resc=fabs(ssat->resc[freq]);
+    int score=100;
+
+    if (el<opt->elmin*R2D) score-=35;
+    else if (el<DIAG_SCORE_LOWEL) score-=20;
+    if (snr>0.0&&snr<DIAG_SCORE_LOWSNR) score-=(int)((DIAG_SCORE_LOWSNR-snr)*2.0);
+    if (resc>DIAG_PHASE_RES) score-=(int)(MIN(resc/DIAG_PHASE_RES,4.0)*10.0);
+    if (resp>DIAG_CODE_RES) score-=(int)(MIN(resp/DIAG_CODE_RES,4.0)*8.0);
+    if (ssat->slip[freq]&1) score-=45;
+    if (ssat->lock[freq]<0) score-=20;
+    else if (ssat->lock[freq]>0&&ssat->lock[freq]<opt->minlock) score-=10;
+    if (ssat->outc[freq]>0) score-=MIN((int)ssat->outc[freq],5)*6;
+    return clampdiagscore(score);
+}
+/* 统计诊断残差分布 ------------------------------------------------------------
+* 根据当前残差分布计算并应用自适应降权和软剔除
+* args   : rtk_t  *rtk      IO  RTK控制结构
+*          double *v        I   残差向量
+*          double *Ri       IO  卫星i测量方差
+*          double *Rj       IO  卫星j测量方差
+*          int    *vflg     I   残差标志
+*          int    nv        I   残差数量
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void diagresiduals(rtk_t *rtk, const double *v, double *Ri, double *Rj,
+                          const int *vflg, int nv)
+{
+    double vals[MAXOBS*NFREQ*2+1],dev[MAXOBS*NFREQ*2+1],med,mad,sigma,r;
+    int i,n,sat1,sat2,type,freq,decision;
+    const char *reason;
+
+    if (!diag_enabled||nv<=2) return;
+    for (i=n=0;i<nv;i++) {
+        sat1=(vflg[i]>>16)&0xFF;
+        sat2=(vflg[i]>> 8)&0xFF;
+        if (sat1<=0||sat2<=0) continue;
+        vals[n++]=fabs(v[i]);
+    }
+    if (n<=2) return;
+    med=median(vals,n);
+    for (i=0;i<n;i++) dev[i]=fabs(vals[i]-med);
+    mad=median(dev,n);
+    sigma=1.4826*mad;
+    if (sigma<1E-4) sigma=1E-4;
+
+    for (i=0;i<nv;i++) {
+        sat1=(vflg[i]>>16)&0xFF;
+        sat2=(vflg[i]>> 8)&0xFF;
+        if (sat1<=0||sat2<=0) continue;
+        r=(fabs(v[i])-med)/sigma;
+        if (r<DIAG_LIGHT_SIGMA) continue;
+        type=(vflg[i]>> 4)&0xF;
+        freq=vflg[i]&0xF;
+        if (freq<0||freq>=NFREQ) continue;
+        decision=r>=DIAG_HEAVY_SIGMA?RTKDIAG_REJECT:RTKDIAG_DOWNWEIGHT;
+        reason=type==0?"large_phase_residual":"large_code_residual";
+        if (decision==RTKDIAG_REJECT) {
+            Ri[i]*=DIAG_REJECT_FACTOR;
+            Rj[i]*=DIAG_REJECT_FACTOR;
+        }
+        else {
+            Ri[i]*=DIAG_DOWNWEIGHT_FACTOR;
+            Rj[i]*=DIAG_DOWNWEIGHT_FACTOR;
+        }
+        markdiag(sat1,freq,decision,reason);
+        markdiag(sat2,freq,decision,reason);
+        if (sat1>0&&sat1<=MAXSAT) diag_resout[sat1-1][freq]=1;
+        if (sat2>0&&sat2<=MAXSAT) diag_resout[sat2-1][freq]=1;
+    }
+}
+/* 计算诊断GDOP ----------------------------------------------------------------
+* 基于当前有效卫星计算GDOP
+* args   : rtk_t  *rtk      I   RTK控制结构
+* return : GDOP值，无法计算时返回0
+*-----------------------------------------------------------------------------*/
+static double diaggdop(const rtk_t *rtk)
+{
+    double azels[MAXSAT*2],dop[4];
+    int i,ns=0;
+
+    for (i=0;i<MAXSAT;i++) {
+        if (!rtk->ssat[i].vs) continue;
+        azels[  ns*2]=rtk->ssat[i].azel[0];
+        azels[1+ns*2]=rtk->ssat[i].azel[1];
+        ns++;
+    }
+    dops(ns,azels,rtk->opt.elmin,dop);
+    return dop[0];
+}
+/* 打开诊断CSV文件 -------------------------------------------------------------
+* 打开观测质量诊断CSV输出
+* args   : char   *dir      I   诊断输出目录
+* return : 1表示成功，0表示失败
+*-----------------------------------------------------------------------------*/
+extern int rtkopendiag(const char *dir)
+{
+    char epath[1024],spath[1024],dummy[1024];
+
+    trace(3,"rtkopendiag: dir=%s\n",dir);
+
+    if (!dir||!*dir) return 0;
+    rtkclosediag();
+    joindiagpath(epath,dir,"epoch_diag.csv");
+    joindiagpath(spath,dir,"sat_diag.csv");
+    joindiagpath(dummy,dir,".diag");
+    createdir(dummy);
+    if (!(fp_diag_epoch=fopen(epath,"w"))) {
+        trace(1,"rtkopendiag: file open error path=%s\n",epath);
+        return 0;
+    }
+    if (!(fp_diag_sat=fopen(spath,"w"))) {
+        trace(1,"rtkopendiag: file open error path=%s\n",spath);
+        fclose(fp_diag_epoch); fp_diag_epoch=NULL;
+        return 0;
+    }
+    fprintf(fp_diag_epoch,"time,stat,ns,ratio,gdop,n_slip,n_reject,n_downweight,n_low_snr,n_low_el,n_res_outlier\n");
+    fprintf(fp_diag_sat,"time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason\n");
+    diag_enabled=1;
+    resetdiag();
+    return 1;
+}
+/* 关闭诊断CSV文件 -------------------------------------------------------------
+* 关闭观测质量诊断CSV输出
+* args   : none
+* return : 无
+*-----------------------------------------------------------------------------*/
+extern void rtkclosediag(void)
+{
+    trace(3,"rtkclosediag:\n");
+
+    if (fp_diag_epoch) fclose(fp_diag_epoch);
+    if (fp_diag_sat) fclose(fp_diag_sat);
+    fp_diag_epoch=NULL;
+    fp_diag_sat=NULL;
+    diag_enabled=0;
+    resetdiag();
+}
 
 /* open solution status file ---------------------------------------------------
 * open solution status file and set output level
@@ -312,23 +613,38 @@ static void swapsolstat(void)
 static void outsolstat(rtk_t *rtk)
 {
     ssat_t *ssat;
-    double tow;
+    double tow,gdop;
     char buff[MAXSOLMSG+1],id[32];
-    int i,j,n,week,nfreq,nf=NF(&rtk->opt);
+    int i,j,n,week,nfreq,nf=NF(&rtk->opt),score,low_snr,low_el;
+    int n_slip=0,n_reject=0,n_downweight=0,n_low_snr=0,n_low_el=0;
+    int n_res_outlier=0;
+    char tstr[64];
     
-    if (statlevel<=0||!fp_stat||!rtk->sol.stat) return;
+    if ((!diag_enabled||!fp_diag_epoch||!fp_diag_sat)&&
+        (statlevel<=0||!fp_stat||!rtk->sol.stat)) return;
     
     trace(3,"outsolstat:\n");
     
     /* swap solution status file */
-    swapsolstat();
-    
-    /* write solution status */
-    n=rtkoutstat(rtk,buff); buff[n]='\0';
-    
-    fputs(buff,fp_stat);
-    
-    if (rtk->sol.stat==SOLQ_NONE||statlevel<=1) return;
+    if (statlevel>0&&fp_stat&&rtk->sol.stat) {
+        swapsolstat();
+
+        /* write solution status */
+        n=rtkoutstat(rtk,buff); buff[n]='\0';
+
+        fputs(buff,fp_stat);
+    }
+    if (rtk->sol.stat==SOLQ_NONE) {
+        if (diag_enabled&&fp_diag_epoch) {
+            time2str(rtk->sol.time,tstr,3);
+            fprintf(fp_diag_epoch,"%s,%d,%d,%.3f,%.3f,%d,%d,%d,%d,%d,%d\n",
+                    tstr,rtk->sol.stat,rtk->sol.ns,rtk->sol.ratio,0.0,
+                    0,0,0,0,0,0);
+            fflush(fp_diag_epoch);
+        }
+        resetdiag();
+        return;
+    }
     
     tow=time2gpst(rtk->sol.time,&week);
     nfreq=rtk->opt.mode>=PMODE_DGPS?nf:1;
@@ -339,12 +655,75 @@ static void outsolstat(rtk_t *rtk)
         if (!ssat->vs) continue;
         satno2id(i+1,id);
         for (j=0;j<nfreq;j++) {
-            fprintf(fp_stat,"$SAT,%d,%.3f,%s,%d,%.1f,%.1f,%.4f,%.4f,%d,%.1f,%d,%d,%d,%d,%d,%d\n",
-                    week,tow,id,j+1,ssat->azel[0]*R2D,ssat->azel[1]*R2D,
-                    ssat->resp[j],ssat->resc[j],ssat->vsat[j],
-                    ssat->snr[j]*SNR_UNIT,ssat->fix[j],ssat->slip[j]&3,
-                    ssat->lock[j],ssat->outc[j],ssat->slipc[j],ssat->rejc[j]);
+            if (statlevel>1&&fp_stat) {
+                fprintf(fp_stat,"$SAT,%d,%.3f,%s,%d,%.1f,%.1f,%.4f,%.4f,%d,%.1f,%d,%d,%d,%d,%d,%d\n",
+                        week,tow,id,j+1,ssat->azel[0]*R2D,ssat->azel[1]*R2D,
+                        ssat->resp[j],ssat->resc[j],ssat->vsat[j],
+                        ssat->snr[j]*SNR_UNIT,ssat->fix[j],ssat->slip[j]&3,
+                        ssat->lock[j],ssat->outc[j],ssat->slipc[j],ssat->rejc[j]);
+            }
+            if (!diag_enabled||!fp_diag_sat) continue;
+            score=qualityscore(ssat,j,&rtk->opt);
+            low_snr=ssat->snr[j]>0&&ssat->snr[j]*SNR_UNIT<DIAG_SCORE_LOWSNR;
+            low_el=ssat->azel[1]<rtk->opt.elmin||ssat->azel[1]*R2D<DIAG_SCORE_LOWEL;
+            if (low_el) markdiag(i+1,j,RTKDIAG_DOWNWEIGHT,"low_elevation");
+            if (low_snr) markdiag(i+1,j,RTKDIAG_DOWNWEIGHT,"low_snr");
+            if (ssat->outc[j]>0) markdiag(i+1,j,RTKDIAG_DOWNWEIGHT,"obs_outage");
+            if (ssat->lock[j]<0||
+                (ssat->lock[j]>0&&ssat->lock[j]<rtk->opt.minlock)) {
+                markdiag(i+1,j,RTKDIAG_DOWNWEIGHT,"poor_lock");
+            }
+            if (ssat->slip[j]&1) {
+                markdiag(i+1,j,RTKDIAG_SLIP_RISK,
+                         (ssat->slip[j]&2)?"cycle_slip_lli":"cycle_slip_gf");
+            }
+            if (score<40&&diag_decision[i][j]!=RTKDIAG_SLIP_RISK) {
+                if (!strcmp(diag_reason[i][j],"nominal")) {
+                    setdiagreason(diag_reason[i][j],
+                                  fabs(ssat->resc[j])>=fabs(ssat->resp[j])?
+                                  "large_phase_residual":"large_code_residual");
+                }
+                markdiag(i+1,j,RTKDIAG_REJECT,diag_reason[i][j]);
+            }
+            else if (score<70&&diag_decision[i][j]==RTKDIAG_USE) {
+                if (!strcmp(diag_reason[i][j],"nominal")) {
+                    setdiagreason(diag_reason[i][j],
+                                  fabs(ssat->resc[j])>=fabs(ssat->resp[j])?
+                                  "large_phase_residual":"large_code_residual");
+                }
+                markdiag(i+1,j,RTKDIAG_DOWNWEIGHT,diag_reason[i][j]);
+            }
+            if (diag_resout[i][j]) {
+                score-=diag_decision[i][j]==RTKDIAG_REJECT?50:25;
+            }
+            if (diag_decision[i][j]==RTKDIAG_SLIP_RISK) score-=45;
+            diag_score[i][j]=score;
+            diag_score[i][j]=clampdiagscore(diag_score[i][j]);
+            if (diag_decision[i][j]==RTKDIAG_SLIP_RISK) n_slip++;
+            else if (diag_decision[i][j]==RTKDIAG_REJECT) n_reject++;
+            else if (diag_decision[i][j]==RTKDIAG_DOWNWEIGHT) n_downweight++;
+            if (low_snr) n_low_snr++;
+            if (low_el) n_low_el++;
+            if (diag_resout[i][j]) n_res_outlier++;
+            time2str(rtk->sol.time,tstr,3);
+            fprintf(fp_diag_sat,"%s,%s,%s,%d,%.1f,%.1f,%.1f,%.4f,%.4f,%d,%d,%d,%u,%u,%d,%s,%s\n",
+                    tstr,id,diagsys(ssat->sys?ssat->sys:satsys(i+1,NULL)),j+1,
+                    ssat->azel[0]*R2D,
+                    ssat->azel[1]*R2D,ssat->snr[j]*SNR_UNIT,ssat->resp[j],
+                    ssat->resc[j],ssat->slip[j]&3,ssat->vsat[j],ssat->lock[j],
+                    ssat->outc[j],ssat->rejc[j],diag_score[i][j],
+                    diagdecisionstr(diag_decision[i][j]),diag_reason[i][j]);
         }
+    }
+    if (diag_enabled&&fp_diag_epoch) {
+        gdop=diaggdop(rtk);
+        time2str(rtk->sol.time,tstr,3);
+        fprintf(fp_diag_epoch,"%s,%d,%d,%.3f,%.3f,%d,%d,%d,%d,%d,%d\n",
+                tstr,rtk->sol.stat,rtk->sol.ns,rtk->sol.ratio,gdop,n_slip,
+                n_reject,n_downweight,n_low_snr,n_low_el,n_res_outlier);
+        fflush(fp_diag_epoch);
+        fflush(fp_diag_sat);
+        resetdiag();
     }
 }
 /* save error message --------------------------------------------------------*/
@@ -619,6 +998,7 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
             if (obs[i].LLI[f]&1) {
                 errmsg(rtk,"slip detected forward  (sat=%2d rcv=%d F=%d LLI=%x)\n",
                        sat,rcv,f+1,obs[i].LLI[f]);
+                markdiag(sat,f,RTKDIAG_SLIP_RISK,"cycle_slip_lli");
             }
             slip=obs[i].LLI[f];
         }
@@ -626,6 +1006,7 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
             if (LLI&1) {
                 errmsg(rtk,"slip detected backward (sat=%2d rcv=%d F=%d LLI=%x)\n",
                        sat,rcv,f+1,LLI);
+                markdiag(sat,f,RTKDIAG_SLIP_RISK,"cycle_slip_lli");
             }
             slip=LLI;
         }
@@ -634,6 +1015,7 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
             errmsg(rtk,"slip detected half-cyc (sat=%2d rcv=%d F=%d LLI=%x->%x)\n",
                    sat,rcv,f+1,LLI,obs[i].LLI[f]);
             slip|=1;
+            markdiag(sat,f,RTKDIAG_SLIP_RISK,"cycle_slip_lli");
         }
         /* save current LLI */
         if (rcv==1) setbitu(&rtk->ssat[sat-1].slip[f],0,2,obs[i].LLI[f]);
@@ -662,6 +1044,8 @@ static void detslp_gf(rtk_t *rtk, const obsd_t *obs, int i, int j,
         if (g0!=0.0&&fabs(g1-g0)>rtk->opt.thresslip) {
             rtk->ssat[sat-1].slip[0]|=1;
             rtk->ssat[sat-1].slip[k]|=1;
+            markdiag(sat,0,RTKDIAG_SLIP_RISK,"cycle_slip_gf");
+            markdiag(sat,k,RTKDIAG_SLIP_RISK,"cycle_slip_gf");
             errmsg(rtk,"slip detected GF jump (sat=%2d L1-L%d GF=%.3f %.3f)\n",
                    sat,k+1,g0,g1);
         }
@@ -694,6 +1078,7 @@ static void detslp_dop(rtk_t *rtk, const obsd_t *obs, int i, int rcv,
         if (fabs(dph-dpt)<=thres) continue;
         
         rtk->slip[sat-1][f]|=1;
+        markdiag(sat,f,RTKDIAG_SLIP_RISK,"cycle_slip_doppler");
         
         errmsg(rtk,"slip detected (sat=%2d rcv=%d L%d=%.3f %.3f thres=%.3f)\n",
                sat,rcv,f+1,dph,dpt,thres);
@@ -1185,6 +1570,9 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
     }
     if (H) {trace(5,"H=\n"); tracemat(5,H,rtk->nx,nv,7,4);}
     
+    /* 诊断启用时根据当前历元残差分布进行轻量自适应抗差处理 */
+    diagresiduals(rtk,v,Ri,Rj,vflg,nv);
+
     /* DD measurement error covariance */
     ddcov(nb,b,Ri,Rj,nv,R);
     
@@ -1765,6 +2153,8 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
     trace(3,"rtkpos  : time=%s n=%d\n",time_str(obs[0].time,3),n);
     trace(4,"obs=\n"); traceobs(4,obs,n);
     
+    if (diag_enabled) resetdiag();
+
     /* set base staion position */
     if (opt->refpos<=POSOPT_RINEX&&opt->mode!=PMODE_SINGLE&&
         opt->mode!=PMODE_MOVEB) {

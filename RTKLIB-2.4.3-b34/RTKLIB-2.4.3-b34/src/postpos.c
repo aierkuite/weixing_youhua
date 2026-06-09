@@ -813,6 +813,7 @@ static void closeses(nav_t *nav, pcvs_t *pcvs, pcvs_t *pcvr)
     
     /* close solution statistics and debug trace */
     rtkclosestat();
+    rtkclosediag();
     traceclose();
 }
 /* set antenna parameters ----------------------------------------------------*/
