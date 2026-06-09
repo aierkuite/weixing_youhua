@@ -1,0 +1,26 @@
+# 构建产物
+*.o
+*.obj
+*.d
+*.exe
+*.dll
+*.pdb
+*.ilk
+
+# RTKLIB 本地运行状态
+*.ini
+*.local
+*.trace
+
+# IDE 和编译输出目录
+Debug/
+Debug_Build/
+Release/
+Release_Build/
+__history/
+__astcache/
+
+# 参考资料和对照源码
+《卫星定位导航系统原理及应用》课程实验.pdf
+《卫星定位导航系统原理及应用》课程实验方案.pdf
+RTKLIB-2.5.0/
