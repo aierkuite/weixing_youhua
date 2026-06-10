@@ -29,8 +29,9 @@ public:
     filopt_t filopt;
     gtime_t ts,te;
     double ti,tu;
-    int n,stat;
+    int n,stat,diagena;
     char *infile[6],outfile[1024];
+    char diagdir[1024];
     char *rov,*base;
 
     explicit ProcessingThread(QObject *parent);
@@ -87,6 +88,8 @@ public slots:
     void OutDirEnaClick();
     void BtnOutDirClick();
     void OutDirChange();
+    void DiagOutEnaClick();
+    void BtnDiagDirClick();
     void BtnInputFile6Click();
     void BtnInputView6Click();
 
@@ -109,7 +112,12 @@ private:
     int  GetOption(prcopt_t &prcopt, solopt_t &solopt, filopt_t &filopt);
     int  ObsToNav (const QString &obsfile, QString &navfile);
 	
+    // 将界面输入的文件 URL 或普通路径转换为 RTKLIB 可用的本地路径
+    // 参数：path 界面控件、命令行或历史记录中的路径文本
+    // 返回值：归一化后的本地文件路径，非文件 URL 时保留原路径并转换为系统分隔符
+    QString LocalFilePath(const QString &path) const;
     QString FilePath(const QString &file);
+    QString DiagDefaultDir(const QString &outfile);
     void ReadList(QComboBox *, QSettings *ini,  const QString &key);
     void WriteList(QSettings *ini, const QString &key, const QComboBox *combo);
     void AddHist  (QComboBox *combo);
@@ -148,7 +156,6 @@ public:
 	double ThresAR2,ThresAR3;
 	double RovPos[3],RefPos[3],BaseLine[2];
 	snrmask_t SnrMask;
-	exterr_t ExtErr;
 	
     QString RnxOpts1,RnxOpts2,PPPOpts;
     QString FieldSep,RovAnt,RefAnt,AntPcvFile,StaPosFile,PrecEphFile;

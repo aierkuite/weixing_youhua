@@ -51,6 +51,19 @@ For Qt, form layout belongs in `.ui` files, resources in `.qrc` files, declarati
 
 Application launch and project configuration belong in the existing `.cbproj`, `.pro`, `.pri`, and app-local install scripts. Do not centralize build files unless the task is explicitly a build-system migration.
 
+### Qt Build Path Contracts
+
+Qt app project files under `app/qtapp/<app>_qt/` are one directory below `app/qtapp/`, so references to the RTKLIB core source tree must resolve from the app-local `.pro` file, not from the Qt root. Prefer a single derived variable:
+
+```qmake
+RTKLIB_SRC = $$clean_path($$_PRO_FILE_PWD_/../../../src)
+INCLUDEPATH += $$RTKLIB_SRC
+```
+
+Use `$$RTKLIB_SRC/release/libRTKLib.a` or `$$RTKLIB_SRC/debug/libRTKLib.a` for app-local links. The `app/qtapp/RTKLib.pro` project itself is rooted at `app/qtapp/`, so its core source path is `../../src`; do not copy that relative path into app-local `.pro` files.
+
+Some Qt resources still reuse the legacy VCL icon assets from `app/winapp/icon/`. When fixing `.qrc` resources in an app-local Qt directory, verify every `<file>` path against the filesystem. From `app/qtapp/rtkpost_qt/`, legacy icon paths should point at `../../winapp/icon/...`, not `../icon/...`.
+
 ---
 
 ## Naming Conventions

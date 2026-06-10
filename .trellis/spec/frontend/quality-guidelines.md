@@ -46,6 +46,17 @@ Build the touched GUI target in its native environment when available:
 * Qt apps through their `.pro` files under `app/qtapp/`
 * Windows VCL apps through their `.cbproj` files under `app/winapp/`
 
+For Qt app targets that link the RTKLIB static library, first build `app/qtapp/RTKLib.pro`, then build the app-local `.pro`. On Windows Qt 5.15.2 + MinGW 8.1.0, the expected sequence is:
+
+```powershell
+& 'D:\QT\5.15.2\mingw81_64\bin\qmake.exe' 'RTKLib.pro'
+& 'D:\QT\Tools\mingw810_64\bin\mingw32-make.exe'
+& 'D:\QT\5.15.2\mingw81_64\bin\qmake.exe' 'rtkpost_qt.pro'
+& 'D:\QT\Tools\mingw810_64\bin\mingw32-make.exe'
+```
+
+Run the first two commands from `app/qtapp/`, and run the app-local commands from the target directory such as `app/qtapp/rtkpost_qt/`. If qmake generates top-level `app/qtapp` build artifacts, keep them ignored rather than committing generated Makefiles, object scripts, `.qmake.stash`, or static library outputs.
+
 If the local environment cannot build GUI targets, perform a source-level check: verify headers match implementations, signal-slot names match declarations, `.ini` keys are unchanged or migrated, and core library calls still receive valid option structs.
 
 For shared core changes that affect GUI behavior, also run the relevant command-line or unit tests from `app/consapp/` or `test/utest/`.

@@ -59,14 +59,10 @@ public slots:
     void BtnDCBViewClick();
     void BtnDCBFileClick();
     void BtnHelpClick();
-    void ExtEna0Click();
-    void ExtEna1Click();
-    void ExtEna2Click();
     void BtnBLQFileViewClick();
     void BtnBLQFileClick();
     void BtnEOPFileClick();
     void BtnEOPViewClick();
-    void BtnExtOptClick();
     void BtnMaskClick();
     void NavSys6Click();
 
@@ -83,10 +79,8 @@ private:
     void SaveOpt(const QString &file);
     void ReadAntList(void);
     void UpdateEnable(void);
-    void UpdateEnableExtErr(void);
-public:
-	exterr_t ExtErr;
 	
+public:
     explicit OptDialog(QWidget *parent);
 };
 //---------------------------------------------------------------------------
