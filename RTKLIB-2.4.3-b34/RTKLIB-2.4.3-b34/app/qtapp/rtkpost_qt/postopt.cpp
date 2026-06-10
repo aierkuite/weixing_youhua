@@ -5,7 +5,6 @@
 #include "keydlg.h"
 #include "viewer.h"
 #include "refdlg.h"
-#include "extopt.h"
 #include "maskoptdlg.h"
 
 #include <QShowEvent>
@@ -91,8 +90,8 @@ OptDialog::OptDialog(QWidget *parent)
     connect(BtnBLQFileView,SIGNAL(clicked(bool)),this,SLOT(BtnBLQFileViewClick()));
     connect(BtnEOPFile,SIGNAL(clicked(bool)),this,SLOT(BtnEOPFileClick()));
     connect(BtnEOPView,SIGNAL(clicked(bool)),this,SLOT(BtnEOPViewClick()));
-    connect(BtnExtOpt,SIGNAL(clicked(bool)),this,SLOT(BtnExtOptClick()));
     connect(BtnMask,SIGNAL(clicked(bool)),this,SLOT(BtnMaskClick()));
+    BtnExtOpt->setVisible(false);
 
     if (nglo<=0) NavSys2->setEnabled(false);
     if (ngal<=0) NavSys3->setEnabled(false);
@@ -526,8 +525,6 @@ void OptDialog::GetOpt(void)
     RovList		 ->setPlainText(mainForm->RovList);
     BaseList	 ->setPlainText(mainForm->BaseList);
 	
-    ExtErr						=mainForm->ExtErr;
-	
 	UpdateEnable();
 }
 //---------------------------------------------------------------------------
@@ -644,8 +641,6 @@ void OptDialog::SetOpt(void)
 	
     mainForm->RovList	  =RovList		->toPlainText();
     mainForm->BaseList	  =BaseList		->toPlainText();
-	
-    mainForm->ExtErr	  =ExtErr;
 	
 	UpdateEnable();
 }
@@ -1097,29 +1092,6 @@ void OptDialog::BtnHelpClick()
     delete keyDialog;
 }
 //---------------------------------------------------------------------------
-void OptDialog::ExtEna0Click()
-{
-	UpdateEnable();
-}
-//---------------------------------------------------------------------------
-void OptDialog::ExtEna1Click()
-{
-	UpdateEnable();
-}
-//---------------------------------------------------------------------------
-void OptDialog::ExtEna2Click()
-{
-	UpdateEnable();
-}
-//---------------------------------------------------------------------------
-void OptDialog::BtnExtOptClick()
-{
-    ExtOptDialog *extOptDialog= new ExtOptDialog(this);
-    extOptDialog->exec();
-
-    delete extOptDialog;
-}
-//---------------------------------------------------------------------------
 void OptDialog::BtnMaskClick()
 {
     MaskOptDialog *maskOptDialog= new MaskOptDialog(this);
@@ -1136,5 +1108,4 @@ void OptDialog::NavSys6Click()
 	UpdateEnable();
 }
 //---------------------------------------------------------------------------
-
 

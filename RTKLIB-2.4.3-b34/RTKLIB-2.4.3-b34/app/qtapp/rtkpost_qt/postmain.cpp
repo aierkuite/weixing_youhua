@@ -46,6 +46,7 @@
 #include <QtGlobal>
 #include <QThread>
 #include <QMimeData>
+#include <QUrl>
 #include <QFileSystemModel>
 #include <QCompleter>
 
@@ -81,7 +82,7 @@ MainForm *mainForm;
 extern "C" {
 
 // show message in message area ---------------------------------------------
-extern int showmsg(char *format, ...)
+extern int showmsg(const char *format, ...)
 {
     va_list arg;
     char buff[1024];
@@ -116,7 +117,7 @@ extern void settime(gtime_t time)
 
 ProcessingThread::ProcessingThread(QObject *parent):QThread(parent)
 {
-    n=stat=0;
+    n=stat=diagena=0;
     prcopt=prcopt_default;
     solopt=solopt_default;
     ts.time=ts.sec=0;
@@ -125,6 +126,7 @@ ProcessingThread::ProcessingThread(QObject *parent):QThread(parent)
     rov=base=NULL;
     for (int i=0;i<6;i++) {infile[i]=new char[1024];infile[i][0]='\0';};
     outfile[0]='\0';
+    diagdir[0]='\0';
 
     memset(&prcopt,0,sizeof(prcopt_t));
     memset(&solopt,0,sizeof(solopt_t));
@@ -158,12 +160,22 @@ void ProcessingThread::addList(char * &sta, const QString & list) {
         strcpy(r++," ");
     }
 }
+// 执行后处理线程，按需打开诊断 CSV 输出
+// 参数：无
+// 返回值：无，通过 done 信号返回处理状态
 void ProcessingThread::run()
 {
+    if (diagena&&!rtkopendiag(diagdir)) {
+        showmsg("error : diagnostic output open error");
+        stat=0;
+        emit done(stat);
+        return;
+    }
     if ((stat=postpos(ts,te,ti,tu,&prcopt,&solopt,&filopt,infile,n,outfile,
                       rov,base))==1) {
         showmsg("aborted");
     };
+    if (diagena) rtkclosediag();
     emit done(stat);
 }
 // constructor --------------------------------------------------------------
@@ -218,6 +230,13 @@ MainForm::MainForm(QWidget *parent)
     dirCompleter->setModel(dirModel);
     OutDir->setCompleter(dirCompleter);
 
+    QCompleter *diagDirCompleter=new QCompleter(this);
+    QFileSystemModel *diagDirModel=new QFileSystemModel(diagDirCompleter);
+    diagDirModel->setRootPath("");
+    diagDirModel->setFilter(QDir::AllDirs|QDir::Drives|QDir::NoDotAndDotDot);
+    diagDirCompleter->setModel(diagDirModel);
+    DiagDir->setCompleter(diagDirCompleter);
+
 
     connect(BtnPlot,SIGNAL(clicked(bool)),this,SLOT(BtnPlotClick()));
     connect(BtnView,SIGNAL(clicked(bool)),this,SLOT(BtnViewClick()));
@@ -255,6 +274,8 @@ MainForm::MainForm(QWidget *parent)
     connect(OutDirEna,SIGNAL(clicked(bool)),this,SLOT(OutDirEnaClick()));
     connect(OutDir,SIGNAL(editingFinished()),this,SLOT(OutDirChange()));
     connect(BtnOutDir,SIGNAL(clicked(bool)),this,SLOT(BtnOutDirClick()));
+    connect(DiagOutEna,SIGNAL(clicked(bool)),this,SLOT(DiagOutEnaClick()));
+    connect(BtnDiagDir,SIGNAL(clicked(bool)),this,SLOT(BtnDiagDirClick()));
 
     QTimer::singleShot(0,this,SLOT(FormCreate()));
 }
@@ -336,7 +357,7 @@ void MainForm::showEvent(QShowEvent* event)
     parser.process(*QApplication::instance());
 
     if (parser.isSet(iniFileOption)) {
-        IniFile=parser.value(iniFileOption);
+        IniFile=LocalFilePath(parser.value(iniFileOption));
     }
     LoadOpt();
 
@@ -344,23 +365,23 @@ void MainForm::showEvent(QShowEvent* event)
         setWindowTitle(parser.value(titleOption));
     }
     if (parser.isSet(roverOption)) {
-        InputFile1->setCurrentText(parser.value(roverOption));
+        InputFile1->setCurrentText(LocalFilePath(parser.value(roverOption)));
         inputflag=1;
     };
     if (parser.isSet(baseStationOption)) {
-        InputFile2->setCurrentText(parser.value(baseStationOption));
+        InputFile2->setCurrentText(LocalFilePath(parser.value(baseStationOption)));
     }
     if (parser.isSet(navFileOption)) {
         QStringList files=parser.values(navFileOption);
         for (int n=0;n<files.size()&&n<4;n++)
-            ifile[n]->setCurrentText(files.at(n));
+            ifile[n]->setCurrentText(LocalFilePath(files.at(n)));
     }
     if (parser.isSet(outputOption)) {
-        OutputFile->setCurrentText(parser.value(outputOption));
+        OutputFile->setCurrentText(LocalFilePath(parser.value(outputOption)));
     }
     if (parser.isSet(outputDirOption)) {
         OutDirEna->setChecked(true);
-        OutDir->setText(parser.value(outputDirOption));
+        OutDir->setText(LocalFilePath(parser.value(outputDirOption)));
     }
     if (parser.isSet(timeStartOption)) {
         TimeStart->setChecked(true);
@@ -404,7 +425,7 @@ void MainForm::closeEvent(QCloseEvent *event)
 // callback on drop files ---------------------------------------------------
 void  MainForm::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (event->mimeData()->hasFormat("text/uri-list"))
+    if (event->mimeData()->hasUrls()||event->mimeData()->hasFormat("text/uri-list"))
         event->acceptProposedAction();
 }
 void  MainForm::dropEvent(QDropEvent *event)
@@ -412,9 +433,14 @@ void  MainForm::dropEvent(QDropEvent *event)
     QPoint point=event->pos();
     int top;
     
-    if (!event->mimeData()->hasFormat("text/uri-list")) return;
+    if (!event->mimeData()->hasUrls()&&!event->mimeData()->hasFormat("text/uri-list")) return;
 
-    QString file=event->mimeData()->text();
+    QString file;
+    if (event->mimeData()->hasUrls()&&!event->mimeData()->urls().isEmpty()) {
+        file=LocalFilePath(event->mimeData()->urls().first().toLocalFile());
+    }
+    if (file=="") file=LocalFilePath(event->mimeData()->text());
+    if (file=="") return;
 
     top=Panel1->pos().y()+Panel4->pos().y();
     if (point.y()<=top+InputFile1->pos().y()+InputFile1->height()) {
@@ -755,6 +781,14 @@ void MainForm::BtnOutDirClick()
     OutDir->setText(QDir::toNativeSeparators(QFileDialog::getExistingDirectory(this,tr("Output Directory"),OutDir->text())));
 #endif
 }
+// 选择诊断 CSV 输出目录
+// 参数：无
+// 返回值：无
+void MainForm::BtnDiagDirClick()
+{
+    QString dir=QFileDialog::getExistingDirectory(this,tr("Diagnostic Directory"),DiagDir->text());
+    if (dir!="") DiagDir->setText(QDir::toNativeSeparators(dir));
+}
 // callback on button keyword -----------------------------------------------
 void MainForm::BtnKeywordClick()
 {
@@ -800,14 +834,27 @@ void MainForm::OutDirChange()
 {
     SetOutFile();
 }
+// 刷新诊断 CSV 输出控件启用状态
+// 参数：无
+// 返回值：无
+void MainForm::DiagOutEnaClick()
+{
+	UpdateEnable();
+}
 // set output file path -----------------------------------------------------
 void MainForm::SetOutFile(void)
 {
-    QString InputFile1_Text=InputFile1->currentText();
-    QString OutDir_Text=OutDir->text();
+    QString InputFile1_Text=LocalFilePath(InputFile1->currentText());
+    QString OutDir_Text=LocalFilePath(OutDir->text());
     QString ofile,ifile;
     
-    if (InputFile1->currentText()=="") return;
+    if (InputFile1_Text=="") return;
+    if (InputFile1->currentText()!=InputFile1_Text) {
+        InputFile1->setCurrentText(InputFile1_Text);
+    }
+    if (OutDir->text()!=OutDir_Text) {
+        OutDir->setText(OutDir_Text);
+    }
     
     ifile=InputFile1_Text;
     
@@ -827,10 +874,13 @@ void MainForm::SetOutFile(void)
 // execute post-processing --------------------------------------------------
 void MainForm::ExecProc(void)
 {
-    QString InputFile1_Text=InputFile1->currentText(),InputFile2_Text=InputFile2->currentText();
-    QString InputFile3_Text=InputFile3->currentText(),InputFile4_Text=InputFile4->currentText();
-    QString InputFile5_Text=InputFile5->currentText(),InputFile6_Text=InputFile6->currentText();
-    QString OutputFile_Text=OutputFile->currentText();
+    QString InputFile1_Text=LocalFilePath(InputFile1->currentText());
+    QString InputFile2_Text=LocalFilePath(InputFile2->currentText());
+    QString InputFile3_Text=LocalFilePath(InputFile3->currentText());
+    QString InputFile4_Text=LocalFilePath(InputFile4->currentText());
+    QString InputFile5_Text=LocalFilePath(InputFile5->currentText());
+    QString InputFile6_Text=LocalFilePath(InputFile6->currentText());
+    QString OutputFile_Text=LocalFilePath(OutputFile->currentText());
     QString temp;
     
     ProcessingThread *thread= new ProcessingThread(this);
@@ -870,6 +920,12 @@ void MainForm::ExecProc(void)
         thread->addInput(InputFile6_Text);
     }
     strcpy(thread->outfile,qPrintable(OutputFile_Text));
+    if (DiagOutEna->isChecked()) {
+        QString diagdir=DiagDir->text()!=""?FilePath(DiagDir->text()):
+                        DiagDefaultDir(OutputFile_Text);
+        thread->diagena=1;
+        strcpy(thread->diagdir,qPrintable(diagdir));
+    }
     
     // confirm overwrite
     if (!TimeStart->isChecked()||!TimeEnd->isChecked()) {
@@ -994,9 +1050,6 @@ int MainForm::GetOption(prcopt_t &prcopt, solopt_t &solopt,
             prcopt.exsats[sat-1]=ex;
         }
     }
-    // extended receiver error model option
-    prcopt.exterr=ExtErr;
-    
     strcpy(prcopt.rnxopt[0],qPrintable(RnxOpts1));
     strcpy(prcopt.rnxopt[1],qPrintable(RnxOpts2));
     strcpy(prcopt.pppopt,qPrintable(PPPOpts));
@@ -1051,12 +1104,46 @@ int MainForm::ObsToNav(const QString &obsfile, QString &navfile)
     else return 0;
     return 1;
 }
+// 将界面路径统一为本地文件路径
+// 参数：path 界面控件、命令行或历史记录中的路径文本
+// 返回值：归一化后的本地文件路径，非文件 URL 时保留原路径并转换为系统分隔符
+QString MainForm::LocalFilePath(const QString &path) const
+{
+    QString text=path.trimmed();
+    QString local;
+    int p;
+
+    if (text=="") return "";
+
+    if (text.contains("\n")||text.contains("\r")) {
+        QStringList lines=text.split(QRegExp("[\r\n]+"),Qt::SkipEmptyParts);
+        if (!lines.isEmpty()) text=lines.first().trimmed();
+    }
+    p=text.indexOf("file:",0,Qt::CaseInsensitive);
+    if (p>0) text=text.mid(p);
+    if (text.startsWith("file:",Qt::CaseInsensitive)) {
+        QString urlText=text;
+        urlText.replace('\\','/');
+        QUrl url(urlText);
+        if (url.isValid()&&url.isLocalFile()) {
+            local=url.toLocalFile();
+            if (local.length()>2&&local.at(0)=='/'&&local.at(2)==':') {
+                local.remove(0,1);
+            }
+            if (local!="") return QDir::toNativeSeparators(local);
+        }
+        text=text.mid(5);
+        while (text.startsWith("/")||text.startsWith("\\")) text.remove(0,1);
+    }
+    return QDir::toNativeSeparators(text);
+}
 // replace file path with keywords ------------------------------------------
 QString MainForm::FilePath(const QString &file)
 {
     gtime_t ts={0,0};
     int p;
     char rov[256]="",base[256]="",path[1024];
+    QString localFile=LocalFilePath(file);
     
     if (TimeStart->isChecked()) ts=GetTime1();
     
@@ -1072,9 +1159,22 @@ QString MainForm::FilePath(const QString &file)
     }
     if (p!=-1) strcpy(base,qPrintable(BaseList.mid(p))); else strcpy(base,qPrintable(RovList));
 
-    reppath(qPrintable(file),path,ts,rov,base);
+    reppath(qPrintable(localFile),path,ts,rov,base);
     
-    return QString(path);
+    return QDir::toNativeSeparators(QString(path));
+}
+// 获取诊断 CSV 默认输出目录
+// 参数：outfile 输出结果文件路径
+// 返回值：诊断 CSV 输出目录
+QString MainForm::DiagDefaultDir(const QString &outfile)
+{
+    QString dir;
+
+    if (OutDirEna->isChecked()&&OutDir->text()!="") {
+        return FilePath(OutDir->text());
+    }
+    dir=QFileInfo(FilePath(outfile)).absolutePath();
+    return dir!=""?dir:".";
 }
 // read history -------------------------------------------------------------
 void MainForm::ReadList(QComboBox* combo, QSettings *ini, const QString &key)
@@ -1083,7 +1183,7 @@ void MainForm::ReadList(QComboBox* combo, QSettings *ini, const QString &key)
     int i;
     
     for (i=0;i<100;i++) {
-        item=ini->value(QString("%1_%2").arg(key).arg(i,3),"").toString();
+        item=LocalFilePath(ini->value(QString("%1_%2").arg(key).arg(i,3),"").toString());
         if (item!="") combo->addItem(item); else break;
     }
 }
@@ -1093,13 +1193,13 @@ void MainForm::WriteList(QSettings *ini, const QString &key, const QComboBox *co
     int i;
     
     for (i=0;i<combo->count();i++) {
-        ini->setValue(QString("%1_%2").arg(key).arg(i,3),combo->itemText(i));
+        ini->setValue(QString("%1_%2").arg(key).arg(i,3),LocalFilePath(combo->itemText(i)));
     }
 }
 // add history --------------------------------------------------------------
 void MainForm::AddHist(QComboBox *combo)
 {
-    QString hist=combo->currentText();
+    QString hist=LocalFilePath(combo->currentText());
     if (hist=="") return;
     int i=combo->currentIndex();
     if (i>=0) combo->removeItem(i);
@@ -1195,6 +1295,9 @@ void MainForm::UpdateEnable(void)
     OutDir         ->setEnabled(OutDirEna->isChecked());
     BtnOutDir      ->setEnabled(OutDirEna->isChecked());
     LabelOutDir    ->setEnabled(OutDirEna->isChecked());
+    DiagDir        ->setEnabled(DiagOutEna->isChecked());
+    BtnDiagDir     ->setEnabled(DiagOutEna->isChecked());
+    LabelDiagDir   ->setEnabled(DiagOutEna->isChecked());
 }
 // load options from ini file -----------------------------------------------
 void MainForm::LoadOpt(void)
@@ -1211,15 +1314,17 @@ void MainForm::LoadOpt(void)
     TimeInt->setCurrentText(ini.value ("set/timeint",     "0").toString());
     TimeUnitF->setChecked(ini.value("set/timeunitf",   0).toBool());
     TimeUnit->setText(ini.value ("set/timeunit",    "24").toString());
-    InputFile1->setCurrentText(ini.value ("set/inputfile1",  "").toString());
-    InputFile2->setCurrentText(ini.value ("set/inputfile2",  "").toString());
-    InputFile3->setCurrentText(ini.value ("set/inputfile3",  "").toString());
-    InputFile4->setCurrentText(ini.value ("set/inputfile4",  "").toString());
-    InputFile5->setCurrentText(ini.value ("set/inputfile5",  "").toString());
-    InputFile6->setCurrentText(ini.value ("set/inputfile6",  "").toString());
+    InputFile1->setCurrentText(LocalFilePath(ini.value ("set/inputfile1",  "").toString()));
+    InputFile2->setCurrentText(LocalFilePath(ini.value ("set/inputfile2",  "").toString()));
+    InputFile3->setCurrentText(LocalFilePath(ini.value ("set/inputfile3",  "").toString()));
+    InputFile4->setCurrentText(LocalFilePath(ini.value ("set/inputfile4",  "").toString()));
+    InputFile5->setCurrentText(LocalFilePath(ini.value ("set/inputfile5",  "").toString()));
+    InputFile6->setCurrentText(LocalFilePath(ini.value ("set/inputfile6",  "").toString()));
     OutDirEna->setChecked(ini.value("set/outputdirena", 0).toBool());
-    OutDir->setText(ini.value ("set/outputdir",   "").toString());
-    OutputFile->setCurrentText(ini.value ("set/outputfile",  "").toString());
+    OutDir->setText(LocalFilePath(ini.value ("set/outputdir",   "").toString()));
+    DiagOutEna->setChecked(ini.value("set/diagoutena", 0).toBool());
+    DiagDir->setText(LocalFilePath(ini.value ("set/diagdir",     "").toString()));
+    OutputFile->setCurrentText(LocalFilePath(ini.value ("set/outputfile",  "").toString()));
     
     ReadList(InputFile1,&ini,"hist/inputfile1");
     ReadList(InputFile2,&ini,"hist/inputfile2");
@@ -1359,21 +1464,6 @@ void MainForm::LoadOpt(void)
     RovList.replace("@@","\n");
     BaseList.replace("@@","\n");
 
-    ExtErr.ena[0]      =ini.value("opt/exterr_ena0",    0).toInt();
-    ExtErr.ena[1]      =ini.value("opt/exterr_ena1",    0).toInt();
-    ExtErr.ena[2]      =ini.value("opt/exterr_ena2",    0).toInt();
-    ExtErr.ena[3]      =ini.value("opt/exterr_ena3",    0).toInt();
-    for (int i=0;i<3;i++) for (int j=0;j<6;j++) {
-        ExtErr.cerr[i][j]=ini.value(QString("opt/exterr_cerr%1%2").arg(i).arg(j),0.3).toDouble();
-    }
-    for (int i=0;i<3;i++) for (int j=0;j<6;j++) {
-        ExtErr.perr[i][j]=ini.value(QString("exterr_perr%1%2").arg(i).arg(j),0.003).toDouble();
-    }
-    ExtErr.gloicb[0]   =ini.value  ("opt/exterr_gloicb0",0.0).toDouble();
-    ExtErr.gloicb[1]   =ini.value  ("opt/exterr_gloicb1",0.0).toDouble();
-    ExtErr.gpsglob[0]  =ini.value  ("opt/exterr_gpsglob0",0.0).toDouble();
-    ExtErr.gpsglob[1]  =ini.value  ("opt/exterr_gpsglob1",0.0).toDouble();
-    
     convDialog->TimeSpan  ->setChecked(ini.value("conv/timespan",  0).toInt());
     convDialog->TimeIntF  ->setChecked(ini.value("conv/timeintf",  0).toInt());
     convDialog->TimeY1    ->setDate(ini.value ("conv/timey1","2000/01/01").toDate());
@@ -1412,15 +1502,17 @@ void MainForm::SaveOpt(void)
     ini.setValue ("set/timeint",     TimeInt   ->currentText());
     ini.setValue("set/timeunitf",   TimeUnitF ->isChecked()?1:0);
     ini.setValue ("set/timeunit",    TimeUnit  ->text());
-    ini.setValue ("set/inputfile1",  InputFile1->currentText());
-    ini.setValue ("set/inputfile2",  InputFile2->currentText());
-    ini.setValue ("set/inputfile3",  InputFile3->currentText());
-    ini.setValue ("set/inputfile4",  InputFile4->currentText());
-    ini.setValue ("set/inputfile5",  InputFile5->currentText());
-    ini.setValue ("set/inputfile6",  InputFile6->currentText());
+    ini.setValue ("set/inputfile1",  LocalFilePath(InputFile1->currentText()));
+    ini.setValue ("set/inputfile2",  LocalFilePath(InputFile2->currentText()));
+    ini.setValue ("set/inputfile3",  LocalFilePath(InputFile3->currentText()));
+    ini.setValue ("set/inputfile4",  LocalFilePath(InputFile4->currentText()));
+    ini.setValue ("set/inputfile5",  LocalFilePath(InputFile5->currentText()));
+    ini.setValue ("set/inputfile6",  LocalFilePath(InputFile6->currentText()));
     ini.setValue("set/outputdirena",OutDirEna ->isChecked());
-    ini.setValue ("set/outputdir",   OutDir    ->text());
-    ini.setValue ("set/outputfile",  OutputFile->currentText());
+    ini.setValue ("set/outputdir",   LocalFilePath(OutDir    ->text()));
+    ini.setValue("set/diagoutena",  DiagOutEna->isChecked());
+    ini.setValue ("set/diagdir",     LocalFilePath(DiagDir   ->text()));
+    ini.setValue ("set/outputfile",  LocalFilePath(OutputFile->currentText()));
     
     WriteList(&ini,"hist/inputfile1",     InputFile1);
     WriteList(&ini,"hist/inputfile2",     InputFile2);
@@ -1558,22 +1650,6 @@ void MainForm::SaveOpt(void)
     for (int i=0;i<10;i++) {
         ini.setValue(QString("opt/baselist%1").arg(i+1),BaseList.mid(i*2000,2000));
     }
-    ini.setValue("opt/exterr_ena0", ExtErr.ena[0]);
-    ini.setValue("opt/exterr_ena1", ExtErr.ena[1]);
-    ini.setValue("opt/exterr_ena2", ExtErr.ena[2]);
-    ini.setValue("opt/exterr_ena3", ExtErr.ena[3]);
-    
-    for (int i=0;i<3;i++) for (int j=0;j<6;j++) {
-        ini.setValue(QString("opt/exterr_cerr%1%2").arg(i).arg(j),ExtErr.cerr[i][j]);
-    }
-    for (int i=0;i<3;i++) for (int j=0;j<6;j++) {
-        ini.setValue(QString("exterr_perr%1%2").arg(i).arg(j),ExtErr.perr[i][j]);
-    }
-    ini.setValue  ("opt/exterr_gloicb0",ExtErr.gloicb[0]);
-    ini.setValue  ("opt/exterr_gloicb1",ExtErr.gloicb[1]);
-    ini.setValue  ("opt/exterr_gpsglob0",ExtErr.gpsglob[0]);
-    ini.setValue  ("opt/exterr_gpsglob1",ExtErr.gpsglob[1]);
-    
     ini.setValue("conv/timespan",   convDialog->TimeSpan  ->isChecked()  );
     ini.setValue ("conv/timey1",     convDialog->TimeY1    ->text()     );
     ini.setValue ("conv/timeh1",     convDialog->TimeH1    ->text()     );
@@ -1598,4 +1674,3 @@ void MainForm::SaveOpt(void)
     ini.setValue("viewer/fontsize",textViewer->FontD.pointSize());
 }
 //---------------------------------------------------------------------------
-

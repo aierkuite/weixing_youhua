@@ -26,6 +26,32 @@ Validate GUI input before converting it into RTKLIB structs or fixed arrays. The
 
 When optimizing or touching unsafe string handling, preserve behavior but prefer bounded operations where the surrounding code and compiler allow it. Any change from `strcpy()` to bounded copying must keep null termination and existing field length assumptions.
 
+For Qt file inputs, normalize file URLs before passing paths to RTKLIB C APIs or helpers such as `postpos()`, `reppath()`, `rtk_uncompress()`, or `QFileInfo`-derived output generation. Drag/drop MIME data and some external callers can produce `file:///D:/data.obs` or malformed persisted variants such as `...\file:\D:\data.pos`; convert these at the GUI boundary with `QUrl(...).toLocalFile()` or an app-local helper, then apply `QDir::toNativeSeparators()`.
+
+Wrong:
+
+```cpp
+QString file=event->mimeData()->text();
+thread->addInput(file);
+reppath(qPrintable(file),path,ts,rov,base);
+```
+
+Correct:
+
+```cpp
+QString file=LocalFilePath(event->mimeData()->urls().first().toLocalFile());
+thread->addInput(file);
+reppath(qPrintable(LocalFilePath(file)),path,ts,rov,base);
+```
+
+Validation cases:
+
+| Input | Expected boundary value |
+|-------|--------------------------|
+| `file:///D:/GEOP156N(1).26o` | `D:\GEOP156N(1).26o` |
+| `D:\GEOP156N(1).26o` | `D:\GEOP156N(1).26o` |
+| `...\release\file:\D:\GEOP156N(1).pos` | `D:\GEOP156N(1).pos` |
+
 ---
 
 ## Common Patterns
