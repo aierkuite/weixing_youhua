@@ -85,6 +85,10 @@ __published:
 	TSpeedButton *BtnOutputView2;
 	TSpeedButton *BtnOutputView1;
 	TLabel *LabelOutDir;
+	TLabel *LabelDiagDir;
+	TEdit *DiagDir;
+	TCheckBox *DiagOutEna;
+	TButton *BtnDiagDir;
 	TComboBox *InputFile6;
 	TButton *BtnInputFile6;
 	TSpeedButton *BtnInputView6;
@@ -136,6 +140,8 @@ __published:
 	void __fastcall OutDirEnaClick(TObject *Sender);
 	void __fastcall BtnOutDirClick(TObject *Sender);
 	void __fastcall OutDirChange(TObject *Sender);
+	void __fastcall DiagOutEnaClick(TObject *Sender);
+	void __fastcall BtnDiagDirClick(TObject *Sender);
 	void __fastcall BtnInputFile6Click(TObject *Sender);
 	void __fastcall BtnInputView6Click(TObject *Sender);
 	void __fastcall BtnAbortClick(TObject *Sender);
