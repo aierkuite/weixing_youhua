@@ -575,6 +575,24 @@ void __fastcall TMainForm::BtnOutDirClick(TObject *Sender)
     OutDir->Text=dir;
 #endif
 }
+/* 选择诊断输出目录 ----------------------------------------------------------
+* 打开目录选择对话框并把结果写入诊断输出目录输入框
+* args   : TObject *Sender  I   触发目录选择的按钮对象
+* return : 无
+*-----------------------------------------------------------------------------*/
+void __fastcall TMainForm::BtnDiagDirClick(TObject *Sender)
+{
+#ifdef TCPP
+    AnsiString dir=DiagDir->Text;
+    if (!SelectDirectory("Diagnostic Output Directory","",dir)) return;
+    DiagDir->Text=dir;
+#else
+    UnicodeString dir=DiagDir->Text;
+    TSelectDirExtOpts opt=TSelectDirExtOpts()<<sdNewUI<<sdNewFolder;
+    if (!SelectDirectory(L"Diagnostic Output Directory",L"",dir,opt)) return;
+    DiagDir->Text=dir;
+#endif
+}
 // callback on button keyword -----------------------------------------------
 void __fastcall TMainForm::BtnKeywordClick(TObject *Sender)
 {
@@ -718,6 +736,15 @@ void __fastcall TMainForm::OutDirChange(TObject *Sender)
 {
     SetOutFile();
 }
+/* 切换诊断输出开关 ----------------------------------------------------------
+* 根据诊断输出开关刷新诊断目录输入框和按钮的启用状态
+* args   : TObject *Sender  I   触发开关变化的复选框对象
+* return : 无
+*-----------------------------------------------------------------------------*/
+void __fastcall TMainForm::DiagOutEnaClick(TObject *Sender)
+{
+	UpdateEnable();
+}
 // set output file path -----------------------------------------------------
 void __fastcall TMainForm::SetOutFile(void)
 {
@@ -747,7 +774,8 @@ int __fastcall TMainForm::ExecProc(void)
     AnsiString InputFile1_Text=InputFile1->Text,InputFile2_Text=InputFile2->Text;
     AnsiString InputFile3_Text=InputFile3->Text,InputFile4_Text=InputFile4->Text;
     AnsiString InputFile5_Text=InputFile5->Text,InputFile6_Text=InputFile6->Text;
-    AnsiString OutputFile_Text=OutputFile->Text;
+    AnsiString OutputFile_Text=OutputFile->Text,DiagDir_Text=DiagDir->Text;
+    AnsiString OutDir_Text=OutDir->Text,diagdir="";
     FILE *fp;
     prcopt_t prcopt=prcopt_default;
     solopt_t solopt=solopt_default;
@@ -755,7 +783,7 @@ int __fastcall TMainForm::ExecProc(void)
     gtime_t ts={0},te={0};
     double ti=0.0,tu=0.0;
     int i,n=0,stat;
-    char infile_[6][1024]={""},*infile[6],outfile[1024];
+    char infile_[6][1024]={""},*infile[6],outfile[1024],diagpath[1024];
     char *rov,*base,*p,*q,*r;
     
     // get processing options
@@ -800,9 +828,27 @@ int __fastcall TMainForm::ExecProc(void)
             if (ConfDialog->ShowModal()!=mrOk) return 0;
         }
     }
+    if (DiagOutEna->Checked) {
+        if (DiagDir_Text!="") diagdir=FilePath(DiagDir_Text);
+        else if (OutDirEna->Checked&&OutDir_Text!="") diagdir=FilePath(OutDir_Text);
+        else {
+            strcpy(diagpath,outfile);
+            p=strrchr(diagpath,'\\');
+            q=strrchr(diagpath,'/');
+            if (!p||q>p) p=q;
+            if (p) *p='\0';
+            else strcpy(diagpath,".");
+            diagdir=diagpath;
+        }
+        if (!rtkopendiag(diagdir.c_str())) {
+            showmsg((char *)"error : diagnostic output open error");
+            return 0;
+        }
+    }
     // set rover and base station list
-    rov =new char [strlen(RovList .c_str())];
-    base=new char [strlen(BaseList.c_str())];
+    rov =new char [strlen(RovList .c_str())+1];
+    base=new char [strlen(BaseList.c_str())+1];
+    *rov=*base='\0';
     
     for (p=RovList.c_str(),r=rov;*p;p=q+2) {
         
@@ -832,6 +878,7 @@ int __fastcall TMainForm::ExecProc(void)
                       rov,base))==1) {
         showmsg((char *)"aborted");
     }
+    if (DiagOutEna->Checked) rtkclosediag();
     delete [] rov ;
     delete [] base;
     
@@ -1163,6 +1210,9 @@ void __fastcall TMainForm::UpdateEnable(void)
     OutDir         ->Enabled=OutDirEna->Checked;
     BtnOutDir      ->Enabled=OutDirEna->Checked;
     LabelOutDir    ->Enabled=OutDirEna->Checked;
+    DiagDir        ->Enabled=DiagOutEna->Checked;
+    BtnDiagDir     ->Enabled=DiagOutEna->Checked;
+    LabelDiagDir   ->Enabled=DiagOutEna->Checked;
 }
 // load options from ini file -----------------------------------------------
 void __fastcall TMainForm::LoadOpt(void)
@@ -1190,6 +1240,8 @@ void __fastcall TMainForm::LoadOpt(void)
     InputFile6->Text   =ini->ReadString ("set","inputfile6",  "");
     OutDirEna->Checked =ini->ReadInteger("set","outputdirena", 0);
     OutDir->Text       =ini->ReadString ("set","outputdir",   "");
+    DiagOutEna->Checked=ini->ReadInteger("set","diagoutena",   0);
+    DiagDir->Text      =ini->ReadString ("set","diagdir",     "");
     OutputFile->Text   =ini->ReadString ("set","outputfile",  "");
     
     InputFile1->Items  =ReadList(ini,"hist","inputfile1");
@@ -1399,6 +1451,8 @@ void __fastcall TMainForm::SaveOpt(void)
     ini->WriteString ("set","inputfile6",  InputFile6->Text);
     ini->WriteInteger("set","outputdirena",OutDirEna ->Checked);
     ini->WriteString ("set","outputdir",   OutDir    ->Text);
+    ini->WriteInteger("set","diagoutena",  DiagOutEna->Checked);
+    ini->WriteString ("set","diagdir",     DiagDir   ->Text);
     ini->WriteString ("set","outputfile",  OutputFile->Text);
     
     WriteList(ini,"hist","inputfile1",     InputFile1->Items);
@@ -1603,6 +1657,8 @@ void __fastcall TMainForm::Panel5Resize(TObject *Sender)
 	
 	BtnOutDir->Left=w-BtnOutDir->Width-5;
 	OutDir->Width=w-BtnOutDir->Width-OutDir->Left-6;
+	BtnDiagDir->Left=w-BtnDiagDir->Width-5;
+	DiagDir->Width=w-BtnDiagDir->Width-DiagDir->Left-6;
 	BtnOutputFile->Left=w-BtnOutputFile->Width-5;
 	OutputFile->Width=w-BtnOutputFile->Width-OutputFile->Left-6;
     
@@ -1631,4 +1687,3 @@ void __fastcall TMainForm::ComboCloseUp(TObject *Sender)
     ::PostMessage(combo->Handle,CB_SETEDITSEL,-1,0);
 }
 //---------------------------------------------------------------------------
-

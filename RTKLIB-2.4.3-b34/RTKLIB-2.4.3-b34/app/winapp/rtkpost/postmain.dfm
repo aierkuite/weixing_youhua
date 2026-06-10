@@ -3,12 +3,12 @@ object MainForm: TMainForm
   Top = 0
   BorderIcons = [biSystemMenu, biMinimize]
   Caption = 'RTKPOST'
-  ClientHeight = 347
+  ClientHeight = 372
   ClientWidth = 472
   Color = clWindow
-  Constraints.MaxHeight = 386
+  Constraints.MaxHeight = 411
   Constraints.MaxWidth = 800
-  Constraints.MinHeight = 386
+  Constraints.MinHeight = 411
   Constraints.MinWidth = 488
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
@@ -26,7 +26,7 @@ object MainForm: TMainForm
     Left = 0
     Top = 0
     Width = 472
-    Height = 281
+    Height = 306
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 0
@@ -671,7 +671,7 @@ object MainForm: TMainForm
       Left = 1
       Top = 231
       Width = 470
-      Height = 49
+      Height = 74
       Margins.Left = 1
       Margins.Top = 1
       Margins.Right = 1
@@ -695,6 +695,14 @@ object MainForm: TMainForm
         Height = 13
         Caption = 'Dir'
       end
+      object LabelDiagDir: TLabel
+        Left = 65
+        Top = 29
+        Width = 45
+        Height = 13
+        Caption = 'Diag CSV'
+        Enabled = False
+      end
       object OutDirEna: TCheckBox
         Left = 48
         Top = 4
@@ -703,19 +711,27 @@ object MainForm: TMainForm
         TabOrder = 0
         OnClick = OutDirEnaClick
       end
+      object DiagOutEna: TCheckBox
+        Left = 48
+        Top = 28
+        Width = 15
+        Height = 17
+        TabOrder = 3
+        OnClick = DiagOutEnaClick
+      end
       object OutputFile: TComboBox
         Left = 4
-        Top = 24
+        Top = 49
         Width = 434
         Height = 21
         AutoComplete = False
         DropDownCount = 20
-        TabOrder = 3
+        TabOrder = 6
         OnCloseUp = ComboCloseUp
       end
       object BtnOutputFile: TButton
         Left = 439
-        Top = 24
+        Top = 49
         Width = 25
         Height = 21
         Caption = '...'
@@ -725,7 +741,7 @@ object MainForm: TMainForm
         Font.Name = 'Tahoma'
         Font.Style = []
         ParentFont = False
-        TabOrder = 4
+        TabOrder = 7
         OnClick = BtnOutputFileClick
       end
       object OutDir: TEdit
@@ -753,12 +769,36 @@ object MainForm: TMainForm
         TabOrder = 2
         OnClick = BtnOutDirClick
       end
+      object DiagDir: TEdit
+        Left = 114
+        Top = 26
+        Width = 324
+        Height = 21
+        Enabled = False
+        TabOrder = 4
+      end
+      object BtnDiagDir: TButton
+        Left = 439
+        Top = 26
+        Width = 25
+        Height = 21
+        Caption = '...'
+        Enabled = False
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clWindowText
+        Font.Height = -9
+        Font.Name = 'Tahoma'
+        Font.Style = []
+        ParentFont = False
+        TabOrder = 5
+        OnClick = BtnDiagDirClick
+      end
     end
   end
   object Panel2: TPanel
     AlignWithMargins = True
     Left = 2
-    Top = 316
+    Top = 341
     Width = 469
     Height = 30
     Margins.Left = 2
@@ -937,7 +977,7 @@ object MainForm: TMainForm
   object Progress: TProgressBar
     AlignWithMargins = True
     Left = 2
-    Top = 279
+    Top = 304
     Width = 468
     Height = 7
     Margins.Left = 2
@@ -952,7 +992,7 @@ object MainForm: TMainForm
   object Message: TPanel
     AlignWithMargins = True
     Left = 1
-    Top = 289
+    Top = 314
     Width = 470
     Height = 25
     Margins.Left = 1
