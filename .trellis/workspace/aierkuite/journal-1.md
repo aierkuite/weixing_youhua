@@ -71,3 +71,36 @@ Added backend-only rnx2rtkp observation diagnostics with diagnostic CSV output, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: RTKPOST Qt 诊断 CSV 前端
+
+**Date**: 2026-06-10
+**Task**: RTKPOST Qt 诊断 CSV 前端
+**Branch**: `main`
+
+### Summary
+
+修复 rtkpost_qt 构建与资源路径，添加诊断 CSV 输出控件，并归一化 Qt 拖拽 file URL，避免 no obs data。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `439a5c5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
