@@ -78,6 +78,19 @@ For command-line app changes, prefer writing deterministic outputs that can be c
 - `quality_score` must remain in the inclusive range 0..100
 - `decision` must be one of `use`, `downweight`, `reject`, or `slip_risk`
 
+### 3.1 Mode-Specific Field Semantics
+
+The CSV header is stable across processing modes, but several fields have mode-specific meaning:
+
+| Field | Single-point mode | RTK / carrier-phase modes |
+|-------|-------------------|---------------------------|
+| `vsat` | Satellite-level participation from `ssat.vs`, because `pntpos()` updates the single-point validity flag | Frequency-level participation from `ssat.vsat[f]`, because relative and PPP processing update per-frequency validity |
+| `ratio` | Usually `0.000`; this is a normal placeholder because ambiguity validation is not active | Meaningful for float/fix ambiguity validation |
+| `resc` | May stay `0.0000` when no carrier-phase residual is estimated | Carrier-phase residual for the frequency |
+| `slip`, `lock`, `outc`, `rejc` | May stay zero for long periods and should not by itself be treated as an error | Useful for carrier-phase tracking, outage, and rejection diagnostics |
+
+For single-point diagnostic review, prefer `stat`, `ns`, `gdop`, `snr`, `resp`, `quality_score`, `decision`, and `reason`. Normal zero placeholders in `ratio`, `resc`, `slip`, `lock`, `outc`, or `rejc` are not evidence that the diagnostic output is broken.
+
 ### 4. Validation & Error Matrix
 - Missing `dir` or empty `dir` -> `rtkopendiag()` returns 0
 - Unable to create the directory or open either CSV -> `rtkopendiag()` returns 0

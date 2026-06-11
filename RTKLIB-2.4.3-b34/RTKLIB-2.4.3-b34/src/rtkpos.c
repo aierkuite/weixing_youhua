@@ -272,6 +272,19 @@ static int qualityscore(const ssat_t *ssat, int freq, const prcopt_t *opt)
     if (ssat->outc[freq]>0) score-=MIN((int)ssat->outc[freq],5)*6;
     return clampdiagscore(score);
 }
+/* 获取诊断CSV有效卫星标志 -----------------------------------------------------
+* 根据处理模式返回诊断CSV中的卫星有效标志
+* args   : rtk_t  *rtk      I   RTK控制结构
+*          ssat_t *ssat     I   卫星状态
+*          int    freq      I   频点索引
+* return : 诊断CSV中的有效卫星标志
+*-----------------------------------------------------------------------------*/
+static int diagvsat(const rtk_t *rtk, const ssat_t *ssat, int freq)
+{
+    if (rtk->opt.mode==PMODE_SINGLE) return ssat->vs;
+    if (rtk->opt.mode>=PMODE_PPP_KINEMA&&NF(&rtk->opt)<=1) return ssat->vs;
+    return ssat->vsat[freq];
+}
 /* 统计诊断残差分布 ------------------------------------------------------------
 * 根据当前残差分布计算并应用自适应降权和软剔除
 * args   : rtk_t  *rtk      IO  RTK控制结构
@@ -710,7 +723,7 @@ static void outsolstat(rtk_t *rtk)
                     tstr,id,diagsys(ssat->sys?ssat->sys:satsys(i+1,NULL)),j+1,
                     ssat->azel[0]*R2D,
                     ssat->azel[1]*R2D,ssat->snr[j]*SNR_UNIT,ssat->resp[j],
-                    ssat->resc[j],ssat->slip[j]&3,ssat->vsat[j],ssat->lock[j],
+                    ssat->resc[j],ssat->slip[j]&3,diagvsat(rtk,ssat,j),ssat->lock[j],
                     ssat->outc[j],ssat->rejc[j],diag_score[i][j],
                     diagdecisionstr(diag_decision[i][j]),diag_reason[i][j]);
         }
