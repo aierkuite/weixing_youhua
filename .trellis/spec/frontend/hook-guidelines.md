@@ -40,6 +40,8 @@ There is no frontend data-fetching framework. File downloads, stream reads, and 
 
 Avoid blocking the GUI event loop with long-running processing.
 
+RTKLIB processing callbacks use `showmsg()` as both a progress-message hook and a break check. `postpos.c` propagates `showmsg()` through `checkbrk()` and treats a non-zero return as an abort request. GUI implementations must therefore reset the abort flag before starting a new worker run, return `0` while processing should continue, and return non-zero only when the user has requested abort.
+
 ---
 
 ## Naming Conventions

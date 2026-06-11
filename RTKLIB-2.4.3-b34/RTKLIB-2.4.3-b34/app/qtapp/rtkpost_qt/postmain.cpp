@@ -92,8 +92,8 @@ extern int showmsg(const char *format, ...)
         va_end(arg);
         QMetaObject::invokeMethod(mainForm, "ShowMsg",Qt::QueuedConnection,
                                   Q_ARG(QString,QString(buff)));
-    }    
-    return !mainForm->AbortFlag;
+    }
+    return mainForm?mainForm->AbortFlag:0;
 }
 // set time span of progress bar --------------------------------------------
 extern void settspan(gtime_t ts, gtime_t te)
@@ -530,6 +530,7 @@ void MainForm::BtnExecClick()
         showmsg("error : invalid extension of output file (%s)",qPrintable(OutputFile_Text));
         return;
     }
+    AbortFlag=0;
     showmsg("");
     BtnAbort ->setVisible(true);
     BtnExec  ->setVisible(false);
@@ -558,8 +559,9 @@ void MainForm::ProcessingFinished(int stat)
         AddHist(OutputFile);
     }
 
-    if (Message->text().contains("processing")) {
-        showmsg("done");
+    if (Message->text().contains("processing")||
+        Message->text().contains("reading")) {
+        showmsg(stat==1?"aborted":(stat<0?"error":"done"));
     }
     BtnAbort ->setVisible(false);
     BtnExec  ->setVisible(true);
