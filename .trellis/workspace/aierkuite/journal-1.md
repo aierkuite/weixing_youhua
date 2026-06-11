@@ -104,3 +104,36 @@ Added backend-only rnx2rtkp observation diagnostics with diagnostic CSV output, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 修复 rtkpost_qt 诊断 CSV
+
+**Date**: 2026-06-11
+**Task**: 修复 rtkpost_qt 诊断 CSV
+**Branch**: `feature/first_final`
+
+### Summary
+
+修复 Qt showmsg 返回语义导致诊断 CSV 只写表头的问题，补充单点解 vsat 字段语义和回调规范，并完成用户数据与 Qt release 构建验证
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b2d24f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
