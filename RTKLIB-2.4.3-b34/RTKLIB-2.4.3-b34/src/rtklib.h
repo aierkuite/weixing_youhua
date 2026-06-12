@@ -136,6 +136,11 @@ extern "C" {
 #endif
 
 #define SNR_UNIT    0.001               /* SNR unit (dBHz) */
+#define ROBUST_IGG3_K0 2.0              /* IGG-III起始降权阈值 */
+#define ROBUST_IGG3_K1 6.0              /* IGG-III软剔除阈值 */
+#define ROBUST_REJECT_FACTOR 1E6         /* 抗差软剔除方差放大系数 */
+#define WEIGHTSNR_REF 50.0               /* SNR随机模型参考信噪比(dB-Hz) */
+#define WEIGHTSNR_ERR 0.3                /* SNR随机模型参考标准差(m) */
 
 #define MINPRNGPS   1                   /* min satellite PRN number of GPS */
 #define MAXPRNGPS   32                  /* max satellite PRN number of GPS */
@@ -1021,6 +1026,9 @@ typedef struct {        /* processing options type */
     double odisp[2][6*11]; /* ocean tide loading parameters {rov,base} */
     int  freqopt;       /* disable L2-AR */
     char pppopt[256];   /* ppp option */
+    int  robust;        /* 抗差定权模式 (0:off,1:IGG-III) */
+    int  weightsnr;     /* SNR随机模型开关 (0:off,1:on) */
+    int  smoothwin;     /* Hatch平滑窗口历元数 (0:off,>=2:on) */
 } prcopt_t;
 
 typedef struct {        /* solution options type */

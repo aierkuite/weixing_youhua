@@ -49,6 +49,8 @@ Use the existing RTKLIB file readers and writers before adding new parsing logic
 
 When expanding file paths or time-template paths, use the established helpers in `src/rtkcmn.c`, such as `expath()`, `reppath()`, `reppaths()`, and `createdir()`.
 
+> **Warning**: on WIN32, `expath()` splits the directory part only on `'\\'`. A relative input path written with forward slashes (`../../test/data/x.05o`) silently loses its directory and surfaces as `error : no obs data`. Always pass observation/nav input paths with backslashes on Windows (`..\..\test\data\x.05o`), and reproduce baseline runs with the same separator form recorded in the `.pos` header `% inp file` lines.
+
 ---
 
 ## Generated Files
@@ -73,10 +75,13 @@ For command-line app changes, prefer writing deterministic outputs that can be c
 - `rtkopendiag()` must create the output directory if needed, then open both CSV files for writing
 - `epoch_diag.csv` header:
   `time,stat,ns,ratio,gdop,n_slip,n_reject,n_downweight,n_low_snr,n_low_el,n_res_outlier`
-- `sat_diag.csv` header:
-  `time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason`
+- `sat_diag.csv` header (v2, task 06-11 appended `var_factor` as column 18):
+  `time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason,var_factor`
 - `quality_score` must remain in the inclusive range 0..100
 - `decision` must be one of `use`, `downweight`, `reject`, or `slip_risk`
+- `var_factor` is the actual measurement-variance inflation applied by robust weighting (1.0 = untouched). With all processing switches off it must be exactly `1` on every row
+- Schema evolution rule: only append new columns at the end of the header; never rename, reorder, or remove existing columns (consumers read by column name, e.g. `tools/matlab/compare_solutions.m`)
+- Since task 06-11, `--diag` is read-only: it must not modify `Ri`/`Rj` or any solver state. Robust downweighting lives behind `pos2-robust` (`robustddres()` in `src/rtkpos.c`), independent of `diag_enabled`
 
 ### 3.1 Mode-Specific Field Semantics
 
@@ -121,6 +126,49 @@ if (*diagdir && rtkopendiag(diagdir)) {
     ret = postpos(...);
     rtkclosediag();
 }
+```
+
+## Scenario: adding a `prcopt_t` processing switch
+
+### 1. Scope / Trigger
+- Trigger: task 06-11 added `robust`, `weightsnr`, `smoothwin` (`pos2-robust`, `stats-weightsnr`, `pos1-smoothwin`). Any new processing option is a cross-layer contract (conf file ↔ struct ↔ GUI) and must follow this scenario.
+
+### 2. Signatures
+Three places must change together, in this order:
+- `src/rtklib.h`: append the field at the tail of `prcopt_t` (Chinese comment, document value domain, 0 = off/legacy behavior)
+- `src/rtkcmn.c` `prcopt_default`: extend the positional initializer to cover the new tail fields — the initializer is order-sensitive; verify field-by-field against the struct declaration
+- `src/options.c` `sysopts[]`: add the entry in the matching key-prefix section (`pos1-*`, `pos2-*`, `stats-*`); enum options get a `#define XXXOPT "0:off,1:..."` string next to the existing ones
+
+### 3. Contracts
+- Conf key naming follows the section prefix of the struct area it controls (e.g. RTK robust weighting → `pos2-robust`)
+- Default value must be 0 / `off`: switches-all-off output must be byte-identical to the pre-change baseline
+- `loadopts()`+`getsysopts()` → `setsysopts()`+`saveopts()` must round-trip the value losslessly
+
+### 4. Validation & Error Matrix
+- Conf file omits the key -> `getsysopts()` applies the sysopts default (0), NOT `prcopt_default`'s value
+- `-k conf` given to rnx2rtkp -> `resetsysopts()` + full-table `getsysopts()` overwrite `prcopt`: every option not present in the conf is reset to table default. Notably `pos1-posmode` resets to `single`
+- Initializer/declaration drift in `prcopt_default` -> wrong defaults with no compiler error (positional init); guard with the byte-identical zero-regression run
+
+### 5. Good/Base/Bad Cases
+- Good: `rnx2rtkp -p 2 -k on.conf ...` — `-k` is processed in a first pass, command-line `-p` overrides afterwards, so a minimal conf plus explicit mode works
+- Base: no conf, no switches — behavior identical to upstream RTKLIB
+- Bad: `rnx2rtkp -k on.conf <rtk inputs>` with a minimal conf lacking `pos1-posmode` — silently runs single-point and the RTK experiment "succeeds" with wrong-mode results
+
+### 6. Tests Required
+- Round-trip: load a conf with the new key, save it back, reload — assert value survives both directions
+- Zero regression: switches off (default and explicit-off conf), run fixture datasets, `cmp` the `.pos` byte-for-byte against the archived baseline
+- Option effectiveness: switch on via `-k`, assert the output actually differs from the off run
+
+### 7. Wrong vs Correct
+#### Wrong
+```bash
+# minimal conf, RTK inputs: -k resets pos1-posmode to single
+./rnx2rtkp.exe -k on.conf rover.obs base.nav base.obs -o out.pos
+```
+#### Correct
+```bash
+# explicit mode after -k, or include pos1-posmode in the conf
+./rnx2rtkp.exe -p 2 -k on.conf rover.obs base.nav base.obs -o out.pos
 ```
 
 ---

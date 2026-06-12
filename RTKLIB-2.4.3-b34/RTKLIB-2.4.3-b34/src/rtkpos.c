@@ -76,10 +76,6 @@
 #define DIAG_SCORE_LOWSNR 35.0 /* 低信噪比评分阈值 */
 #define DIAG_PHASE_RES 0.08  /* 载波相位残差评分尺度 */
 #define DIAG_CODE_RES 5.0    /* 伪距残差评分尺度 */
-#define DIAG_LIGHT_SIGMA 3.0 /* 轻度残差异常阈值 */
-#define DIAG_HEAVY_SIGMA 6.0 /* 严重残差异常阈值 */
-#define DIAG_DOWNWEIGHT_FACTOR 9.0 /* 降权方差放大系数 */
-#define DIAG_REJECT_FACTOR 1E6 /* 软剔除方差放大系数 */
 
 /* number of parameters (pos,ionos,tropos,hw-bias,phase-bias,real,estimated) */
 #define NF(opt)     ((opt)->ionoopt==IONOOPT_IFLC?1:(opt)->nf)
@@ -109,6 +105,7 @@ static int diag_decision[MAXSAT][NFREQ]; /* 诊断决策 */
 static int diag_score[MAXSAT][NFREQ]; /* 观测质量评分 */
 static char diag_reason[MAXSAT][NFREQ][64]; /* 诊断原因 */
 static int diag_resout[MAXSAT][NFREQ]; /* 残差异常标志 */
+static double diag_var_factor[MAXSAT][NFREQ]; /* 实际方差放大倍数 */
 
 /* 拷贝诊断原因字符串 ----------------------------------------------------------
 * 拷贝诊断原因字符串
@@ -136,6 +133,7 @@ static void resetdiag(void)
         diag_score[i][j]=100;
         setdiagreason(diag_reason[i][j],"nominal");
         diag_resout[i][j]=0;
+        diag_var_factor[i][j]=1.0;
     }
 }
 /* 生成诊断输出路径 ------------------------------------------------------------
@@ -228,6 +226,62 @@ static double median(double *data, int n)
     qsort(data,n,sizeof(double),cmpdouble);
     return n%2?data[n/2]:(data[n/2-1]+data[n/2])*0.5;
 }
+/* 计算IGG-III方差放大系数 -----------------------------------------------------
+* 根据标准化残差计算IGG-III等价方差放大系数
+* args   : double r        I   标准化残差绝对值
+* return : 方差放大系数，1表示不降权
+*-----------------------------------------------------------------------------*/
+static double igg3varfactor(double r)
+{
+    double w,t;
+
+    if (r<=ROBUST_IGG3_K0) return 1.0;
+    if (r>ROBUST_IGG3_K1) return ROBUST_REJECT_FACTOR;
+    t=(ROBUST_IGG3_K1-r)/(ROBUST_IGG3_K1-ROBUST_IGG3_K0);
+    w=(ROBUST_IGG3_K0/r)*t*t;
+    return w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+}
+/* 计算SNR随机模型方差 ---------------------------------------------------------
+* 根据信噪比计算附加观测方差
+* args   : double snr      I   信噪比(dB-Hz)
+*          prcopt_t *opt   I   处理选项
+* return : SNR附加方差，未启用或信噪比无效时为0
+*-----------------------------------------------------------------------------*/
+static double snrvariance(double snr, const prcopt_t *opt)
+{
+    if (!opt||!opt->weightsnr||snr<=0.0) return 0.0;
+    return SQR(WEIGHTSNR_ERR)*pow(10.0,(WEIGHTSNR_REF-snr)/10.0);
+}
+/* 计算双差残差鲁棒统计量 ------------------------------------------------------
+* 从有效双差残差计算中位数和MAD尺度
+* args   : double *v        I   残差向量
+*          int    *vflg     I   残差标志
+*          int    nv        I   残差数量
+*          double *med      O   残差绝对值中位数
+*          double *sigma    O   MAD换算尺度
+* return : 1表示统计量有效，0表示样本不足
+*-----------------------------------------------------------------------------*/
+static int residualstats(const double *v, const int *vflg, int nv,
+                         double *med, double *sigma)
+{
+    double vals[MAXOBS*NFREQ*2+1],dev[MAXOBS*NFREQ*2+1],mad;
+    int i,n,sat1,sat2;
+
+    if (nv<=2) return 0;
+    for (i=n=0;i<nv;i++) {
+        sat1=(vflg[i]>>16)&0xFF;
+        sat2=(vflg[i]>> 8)&0xFF;
+        if (sat1<=0||sat2<=0) continue;
+        vals[n++]=fabs(v[i]);
+    }
+    if (n<=2) return 0;
+    *med=median(vals,n);
+    for (i=0;i<n;i++) dev[i]=fabs(vals[i]-*med);
+    mad=median(dev,n);
+    *sigma=1.4826*mad;
+    if (*sigma<1E-4) *sigma=1E-4;
+    return 1;
+}
 /* 标记诊断决策 ----------------------------------------------------------------
 * 按优先级更新观测诊断决策
 * args   : int    sat       I   卫星号
@@ -285,9 +339,9 @@ static int diagvsat(const rtk_t *rtk, const ssat_t *ssat, int freq)
     if (rtk->opt.mode>=PMODE_PPP_KINEMA&&NF(&rtk->opt)<=1) return ssat->vs;
     return ssat->vsat[freq];
 }
-/* 统计诊断残差分布 ------------------------------------------------------------
-* 根据当前残差分布计算并应用自适应降权和软剔除
-* args   : rtk_t  *rtk      IO  RTK控制结构
+/* 双差残差抗差降权 ------------------------------------------------------------
+* 根据当前残差分布调整双差观测方差
+* args   : prcopt_t *opt    I   处理选项
 *          double *v        I   残差向量
 *          double *Ri       IO  卫星i测量方差
 *          double *Rj       IO  卫星j测量方差
@@ -295,46 +349,65 @@ static int diagvsat(const rtk_t *rtk, const ssat_t *ssat, int freq)
 *          int    nv        I   残差数量
 * return : 无
 *-----------------------------------------------------------------------------*/
-static void diagresiduals(rtk_t *rtk, const double *v, double *Ri, double *Rj,
-                          const int *vflg, int nv)
+static void robustddres(const prcopt_t *opt, const double *v, double *Ri,
+                        double *Rj, const int *vflg, int nv)
 {
-    double vals[MAXOBS*NFREQ*2+1],dev[MAXOBS*NFREQ*2+1],med,mad,sigma,r;
-    int i,n,sat1,sat2,type,freq,decision;
-    const char *reason;
+    double med,sigma,r,factor;
+    int i,sat1,sat2,freq;
 
-    if (!diag_enabled||nv<=2) return;
-    for (i=n=0;i<nv;i++) {
-        sat1=(vflg[i]>>16)&0xFF;
-        sat2=(vflg[i]>> 8)&0xFF;
-        if (sat1<=0||sat2<=0) continue;
-        vals[n++]=fabs(v[i]);
-    }
-    if (n<=2) return;
-    med=median(vals,n);
-    for (i=0;i<n;i++) dev[i]=fabs(vals[i]-med);
-    mad=median(dev,n);
-    sigma=1.4826*mad;
-    if (sigma<1E-4) sigma=1E-4;
+    if (!opt||!opt->robust) return;
+    if (!residualstats(v,vflg,nv,&med,&sigma)) return;
 
     for (i=0;i<nv;i++) {
         sat1=(vflg[i]>>16)&0xFF;
         sat2=(vflg[i]>> 8)&0xFF;
         if (sat1<=0||sat2<=0) continue;
         r=(fabs(v[i])-med)/sigma;
-        if (r<DIAG_LIGHT_SIGMA) continue;
+        factor=igg3varfactor(r);
+        if (factor<=1.0) continue;
+        Ri[i]*=factor;
+        Rj[i]*=factor;
+        trace(4,"robustddres: sat=%3d-%3d %s%d v=%13.3f r=%6.2f factor=%.1e\n",
+              sat1,sat2,((vflg[i]>>4)&0xF)==0?"L":"P",(vflg[i]&0xF)+1,v[i],r,
+              factor);
+        freq=vflg[i]&0xF;
+        if (freq>=0&&freq<NFREQ) {
+            if (sat1<=MAXSAT&&diag_var_factor[sat1-1][freq]<factor) {
+                diag_var_factor[sat1-1][freq]=factor;
+            }
+            if (sat2<=MAXSAT&&diag_var_factor[sat2-1][freq]<factor) {
+                diag_var_factor[sat2-1][freq]=factor;
+            }
+        }
+    }
+}
+/* 统计诊断残差分布 ------------------------------------------------------------
+* 根据当前残差分布记录异常残差诊断决策
+* args   : double *v        I   残差向量
+*          int    *vflg     I   残差标志
+*          int    nv        I   残差数量
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void diagresiduals(const double *v, const int *vflg, int nv)
+{
+    double med,sigma,r;
+    int i,sat1,sat2,type,freq,decision;
+    const char *reason;
+
+    if (!diag_enabled) return;
+    if (!residualstats(v,vflg,nv,&med,&sigma)) return;
+
+    for (i=0;i<nv;i++) {
+        sat1=(vflg[i]>>16)&0xFF;
+        sat2=(vflg[i]>> 8)&0xFF;
+        if (sat1<=0||sat2<=0) continue;
+        r=(fabs(v[i])-med)/sigma;
+        if (igg3varfactor(r)<=1.0) continue;
         type=(vflg[i]>> 4)&0xF;
         freq=vflg[i]&0xF;
         if (freq<0||freq>=NFREQ) continue;
-        decision=r>=DIAG_HEAVY_SIGMA?RTKDIAG_REJECT:RTKDIAG_DOWNWEIGHT;
+        decision=r>ROBUST_IGG3_K1?RTKDIAG_REJECT:RTKDIAG_DOWNWEIGHT;
         reason=type==0?"large_phase_residual":"large_code_residual";
-        if (decision==RTKDIAG_REJECT) {
-            Ri[i]*=DIAG_REJECT_FACTOR;
-            Rj[i]*=DIAG_REJECT_FACTOR;
-        }
-        else {
-            Ri[i]*=DIAG_DOWNWEIGHT_FACTOR;
-            Rj[i]*=DIAG_DOWNWEIGHT_FACTOR;
-        }
         markdiag(sat1,freq,decision,reason);
         markdiag(sat2,freq,decision,reason);
         if (sat1>0&&sat1<=MAXSAT) diag_resout[sat1-1][freq]=1;
@@ -387,7 +460,7 @@ extern int rtkopendiag(const char *dir)
         return 0;
     }
     fprintf(fp_diag_epoch,"time,stat,ns,ratio,gdop,n_slip,n_reject,n_downweight,n_low_snr,n_low_el,n_res_outlier\n");
-    fprintf(fp_diag_sat,"time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason\n");
+    fprintf(fp_diag_sat,"time,sat,sys,freq,az,el,snr,resp,resc,slip,vsat,lock,outc,rejc,quality_score,decision,reason,var_factor\n");
     diag_enabled=1;
     resetdiag();
     return 1;
@@ -719,13 +792,14 @@ static void outsolstat(rtk_t *rtk)
             if (low_el) n_low_el++;
             if (diag_resout[i][j]) n_res_outlier++;
             time2str(rtk->sol.time,tstr,3);
-            fprintf(fp_diag_sat,"%s,%s,%s,%d,%.1f,%.1f,%.1f,%.4f,%.4f,%d,%d,%d,%u,%u,%d,%s,%s\n",
+            fprintf(fp_diag_sat,"%s,%s,%s,%d,%.1f,%.1f,%.1f,%.4f,%.4f,%d,%d,%d,%u,%u,%d,%s,%s,%.6g\n",
                     tstr,id,diagsys(ssat->sys?ssat->sys:satsys(i+1,NULL)),j+1,
                     ssat->azel[0]*R2D,
                     ssat->azel[1]*R2D,ssat->snr[j]*SNR_UNIT,ssat->resp[j],
                     ssat->resc[j],ssat->slip[j]&3,diagvsat(rtk,ssat,j),ssat->lock[j],
                     ssat->outc[j],ssat->rejc[j],diag_score[i][j],
-                    diagdecisionstr(diag_decision[i][j]),diag_reason[i][j]);
+                    diagdecisionstr(diag_decision[i][j]),diag_reason[i][j],
+                    diag_var_factor[i][j]);
         }
     }
     if (diag_enabled&&fp_diag_epoch) {
@@ -776,9 +850,9 @@ static double gfobs(const obsd_t *obs, int i, int j, int k, const nav_t *nav)
 }
 /* single-differenced measurement error variance -----------------------------*/
 static double varerr(int sat, int sys, double el, double bl, double dt, int f,
-                     const prcopt_t *opt)
+                     double snru, double snrr, const prcopt_t *opt)
 {
-    double a,b,c=opt->err[3]*bl/1E4,d=CLIGHT*opt->sclkstab*dt,fact=1.0;
+    double a,b,c=opt->err[3]*bl/1E4,d=CLIGHT*opt->sclkstab*dt,fact=1.0,var;
     double sinel=sin(el);
     int nf=NF(opt);
     
@@ -788,7 +862,12 @@ static double varerr(int sat, int sys, double el, double bl, double dt, int f,
     a=fact*opt->err[1];
     b=fact*opt->err[2];
     
-    return 2.0*(opt->ionoopt==IONOOPT_IFLC?3.0:1.0)*(a*a+b*b/sinel/sinel+c*c)+d*d;
+    var=2.0*(opt->ionoopt==IONOOPT_IFLC?3.0:1.0)*
+        (a*a+b*b/sinel/sinel+c*c)+d*d;
+    if (opt->weightsnr) {
+        var+=snrvariance(snru,opt)+snrvariance(snrr,opt);
+    }
+    return var;
 }
 /* baseline length -----------------------------------------------------------*/
 static double baseline(const double *ru, const double *rb, double *dr)
@@ -1437,10 +1516,11 @@ static int test_sys(int sys, int m)
     return 0;
 }
 /* DD (double-differenced) phase/code residuals ------------------------------*/
-static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
-                 const double *P, const int *sat, double *y, double *e,
-                 double *azel, double *freq, const int *iu, const int *ir,
-                 int ns, double *v, double *H, double *R, int *vflg)
+static int ddres(rtk_t *rtk, const obsd_t *obs, const nav_t *nav, double dt,
+                 const double *x, const double *P, const int *sat, double *y,
+                 double *e, double *azel, double *freq, const int *iu,
+                 const int *ir, int ns, double *v, double *H, double *R,
+                 int *vflg)
 {
     prcopt_t *opt=&rtk->opt;
     double bl,dr[3],posu[3],posr[3],didxi=0.0,didxj=0.0,*im;
@@ -1556,8 +1636,12 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
                 continue;
             }
             /* SD (single-differenced) measurement error variances */
-            Ri[nv]=varerr(sat[i],sysi,azel[1+iu[i]*2],bl,dt,f,opt);
-            Rj[nv]=varerr(sat[j],sysj,azel[1+iu[j]*2],bl,dt,f,opt);
+            Ri[nv]=varerr(sat[i],sysi,azel[1+iu[i]*2],bl,dt,f,
+                           obs[iu[i]].SNR[f%nf]*SNR_UNIT,
+                           obs[ir[i]].SNR[f%nf]*SNR_UNIT,opt);
+            Rj[nv]=varerr(sat[j],sysj,azel[1+iu[j]*2],bl,dt,f,
+                           obs[iu[j]].SNR[f%nf]*SNR_UNIT,
+                           obs[ir[j]].SNR[f%nf]*SNR_UNIT,opt);
             
             /* set valid data flags */
             if (opt->mode>PMODE_DGPS) {
@@ -1583,8 +1667,11 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
     }
     if (H) {trace(5,"H=\n"); tracemat(5,H,rtk->nx,nv,7,4);}
     
-    /* 诊断启用时根据当前历元残差分布进行轻量自适应抗差处理 */
-    diagresiduals(rtk,v,Ri,Rj,vflg,nv);
+    /* 抗差选项启用时根据当前历元残差分布调整双差方差 */
+    robustddres(opt,v,Ri,Rj,vflg,nv);
+
+    /* 诊断启用时只记录残差异常，不改变解算权重 */
+    diagresiduals(v,vflg,nv);
 
     /* DD measurement error covariance */
     ddcov(nb,b,Ri,Rj,nv,R);
@@ -1927,7 +2014,7 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
             break;
         }
         /* DD (double-differenced) residuals and partial derivatives */
-        if ((nv=ddres(rtk,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,H,R,
+        if ((nv=ddres(rtk,obs,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,H,R,
                       vflg))<1) {
             errmsg(rtk,"no double-differenced residual\n");
             stat=SOLQ_NONE;
@@ -1946,7 +2033,8 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
                                freq)) {
         
         /* post-fit residuals for float solution */
-        nv=ddres(rtk,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,NULL,R,vflg);
+        nv=ddres(rtk,obs,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,NULL,R,
+                 vflg);
         
         /* validation of float solution */
         if (valpos(rtk,v,R,vflg,nv,4.0)) {
@@ -1974,8 +2062,8 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         if (zdres(0,obs,nu,rs,dts,var,svh,nav,xa,opt,0,y,e,azel,freq)) {
             
             /* post-fit reisiduals for fixed solution */
-            nv=ddres(rtk,nav,dt,xa,NULL,sat,y,e,azel,freq,iu,ir,ns,v,NULL,R,
-                     vflg);
+            nv=ddres(rtk,obs,nav,dt,xa,NULL,sat,y,e,azel,freq,iu,ir,ns,v,NULL,
+                     R,vflg);
             
             /* validation of fixed solution */
             if (valpos(rtk,v,R,vflg,nv,4.0)) {

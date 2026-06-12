@@ -26,6 +26,19 @@ setting.setValue("opt/tracelevel",TraceLevel);
 
 Processing state belongs in RTKLIB option and data structs such as `prcopt_t`, `solopt_t`, `filopt_t`, `nav_t`, `obs_t`, `raw_t`, `rtcm_t`, and `strsvr_t`.
 
+### Convention: wiring a new `prcopt_t` switch into rtkpost_qt
+
+**What**: a new core processing option surfaces in the GUI through a fixed set of mapping points (established by `set/diagoutena` in task 06-10, reused for `set/robust`/`set/weightsnr` in 06-11):
+
+1. `postopt.ui` — add the control. `OptDialog` inherits `Ui::OptDialog` publicly, so the widget becomes a member directly; `postopt.h` needs no change
+2. `postopt.cpp` — four mappings: `GetOpt()` (mainForm → control), `SetOpt()` (control → mainForm), `LoadOpt()`/`SaveOpt()` (conf file ↔ control via `loadopts`/`saveopts` and `prcopt` fields)
+3. `postmain.h` — `int` member(s) on `MainForm`
+4. `postmain.cpp` — constructor default (0 = off), `GetOption()` (member → `prcopt` before `postpos()`), `LoadOpt()`/`SaveOpt()` (QSettings key `set/<name>`, lowercase, default 0)
+
+**Why**: missing any one point produces a switch that looks wired but silently drops state on one path (GUI run vs conf save vs ini restore). The control default must equal the struct default so an untouched GUI stays byte-identical to console defaults.
+
+**Verification**: rebuild (`qmake` + `mingw32-make`, the `.ui` change regenerates `ui_*.h`), then grep the exe for the new QSettings key and conf key strings; run the same data GUI vs `rnx2rtkp -k` with equal settings and compare outputs.
+
 ---
 
 ## When To Use Shared State

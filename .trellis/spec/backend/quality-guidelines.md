@@ -57,6 +57,17 @@ For command-line and core library work, use the closest existing makefile test t
 
 On Windows-focused sessions, it is acceptable to document when GCC, make, Qt, C++ Builder, or MATLAB is unavailable locally, but still identify the exact target that should be run in the proper environment.
 
+### Convention: zero-regression baseline compare
+
+**What**: behavior-preserving changes (new switches defaulting to off, diagnostics, refactors) are verified by running the fixture datasets with the pre-change binary once (archived under `baseline/`, not committed) and comparing post-change output with `cmp` byte-for-byte — headers included.
+
+**Why**: RTKLIB `.pos` data lines encode the full numerical state of the solver; a byte-identical diff is the cheapest complete proof that defaults changed nothing. String-level "looks same" review has already missed real regressions (the original `--diag` MAD coupling).
+
+**Rules**:
+- Re-run with the exact same command line as recorded in the baseline `.pos` header (`% inp file` lines), including path separator form (see the `expath()` warning in database-guidelines)
+- `-k conf` runs are not byte-comparable to no-conf runs even with identical values: the `-k` path changes header program/time formatting. Compare `-k off.conf` output against a `-k`-produced baseline, and plain runs against plain baselines
+- Both `--diag` on and off must be covered once a feature claims diag is read-only
+
 ---
 
 ## Code Review Checklist

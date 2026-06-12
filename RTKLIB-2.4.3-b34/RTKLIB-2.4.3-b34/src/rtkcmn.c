@@ -219,7 +219,11 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     30.0,30.0,30.0,             /* maxtdif,maxinno,maxgdop */
     {0},{0},{0},                /* baseline,ru,rb */
     {"",""},                    /* anttype */
-    {{0}},{{0}},{0}             /* antdel,pcv,exsats */
+    {{0}},{{0}},{0},            /* antdel,pcv,exsats */
+    0,0,0,                      /* 最大平均历元,初始化复位,单点输出 */
+    {"",""},                    /* RINEX选项 */
+    {0},0,{{0}},0,"",           /* 定位选项,同步解,海潮位移,频率选项,PPP选项 */
+    0,0,0                       /* 抗差定权,SNR定权,Hatch平滑 */
 };
 const solopt_t solopt_default={ /* defaults solution output options */
     SOLF_LLH,TIMES_GPST,1,3,    /* posf,times,timef,timeu */
@@ -4030,4 +4034,3 @@ extern int showmsg(char *format,...) {return 0;}
 extern void settspan(gtime_t ts, gtime_t te) {}
 extern void settime(gtime_t time) {}
 #endif
-

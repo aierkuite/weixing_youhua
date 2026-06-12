@@ -59,6 +59,7 @@ static char snrmask_[NFREQ][1024];
 #define STAOPT  "0:all,1:single"
 #define STSOPT  "0:off,1:state,2:residual"
 #define ARMOPT  "0:off,1:continuous,2:instantaneous,3:fix-and-hold"
+#define ROBOPT  "0:off,1:igg3"
 #define POSOPT  "0:llh,1:xyz,2:single,3:posfile,4:rinexhead,5:rtcm,6:raw"
 #define TIDEOPT "0:off,1:on,2:otl"
 #define PHWOPT  "0:off,1:on,2:precise"
@@ -84,6 +85,7 @@ EXPORT opt_t sysopts[]={
     {"pos1-posopt4",    3,  (void *)&prcopt_.posopt[3],  SWTOPT },
     {"pos1-posopt5",    3,  (void *)&prcopt_.posopt[4],  SWTOPT },
     {"pos1-posopt6",    3,  (void *)&prcopt_.posopt[5],  SWTOPT },
+    {"pos1-smoothwin",  0,  (void *)&prcopt_.smoothwin,  ""     },
     {"pos1-exclsats",   2,  (void *)exsats_,             "prn ..."},
     {"pos1-navsys",     0,  (void *)&prcopt_.navsys,     NAVOPT },
     
@@ -107,6 +109,7 @@ EXPORT opt_t sysopts[]={
     {"pos2-rejionno",   1,  (void *)&prcopt_.maxinno,    "m"    },
     {"pos2-rejgdop",    1,  (void *)&prcopt_.maxgdop,    ""     },
     {"pos2-niter",      0,  (void *)&prcopt_.niter,      ""     },
+    {"pos2-robust",     3,  (void *)&prcopt_.robust,     ROBOPT },
     {"pos2-baselen",    1,  (void *)&prcopt_.baseline[0],"m"    },
     {"pos2-basesig",    1,  (void *)&prcopt_.baseline[1],"m"    },
     
@@ -144,6 +147,7 @@ EXPORT opt_t sysopts[]={
     {"stats-prntrop",   1,  (void *)&prcopt_.prn[2],     "m"    },
     {"stats-prnpos",    1,  (void *)&prcopt_.prn[5],     "m"    },
     {"stats-clkstab",   1,  (void *)&prcopt_.sclkstab,   "s/s"  },
+    {"stats-weightsnr", 3,  (void *)&prcopt_.weightsnr,  SWTOPT },
     
     {"ant1-postype",    3,  (void *)&antpostype_[0],     POSOPT },
     {"ant1-pos1",       1,  (void *)&antpos_[0][0],      "deg|m"},

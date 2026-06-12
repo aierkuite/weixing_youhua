@@ -43,16 +43,52 @@
 #define ERR_CBIAS   0.3         /* code bias error Std (m) */
 #define REL_HUMI    0.7         /* relative humidity for Saastamoinen model */
 #define MIN_EL      (5.0*D2R)   /* min elevation for measurement error (rad) */
+#define MAXROBUSTITR 3          /* 单点抗差外层最大迭代轮数 */
 
-/* pseudorange measurement error variance ------------------------------------*/
-static double varerr(const prcopt_t *opt, double el, int sys)
+/* 计算IGG-III方差放大系数 -----------------------------------------------------
+* 根据标准化残差计算IGG-III等价方差放大系数
+* args   : double r        I   标准化残差绝对值
+* return : 方差放大系数，1表示不降权
+*-----------------------------------------------------------------------------*/
+static double igg3varfactor(double r)
+{
+    double w,t;
+
+    if (r<=ROBUST_IGG3_K0) return 1.0;
+    if (r>ROBUST_IGG3_K1) return ROBUST_REJECT_FACTOR;
+    t=(ROBUST_IGG3_K1-r)/(ROBUST_IGG3_K1-ROBUST_IGG3_K0);
+    w=(ROBUST_IGG3_K0/r)*t*t;
+    return w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+}
+/* 计算SNR随机模型方差 ---------------------------------------------------------
+* 根据信噪比计算附加伪距方差
+* args   : double snr      I   信噪比(dB-Hz)
+*          prcopt_t *opt   I   处理选项
+* return : SNR附加方差，未启用或信噪比无效时为0
+*-----------------------------------------------------------------------------*/
+static double snrvariance(double snr, const prcopt_t *opt)
+{
+    if (!opt||!opt->weightsnr||snr<=0.0) return 0.0;
+    return SQR(WEIGHTSNR_ERR)*pow(10.0,(WEIGHTSNR_REF-snr)/10.0);
+}
+/* 计算伪距测量误差方差 ---------------------------------------------------------
+* 计算高度角、卫星系统和SNR共同决定的伪距测量误差方差
+* args   : prcopt_t *opt    I   处理选项
+*          double el       I   卫星高度角(rad)
+*          int    sys      I   卫星系统
+*          double snr      I   信噪比(dB-Hz)
+* return : 伪距测量误差方差(m^2)
+*-----------------------------------------------------------------------------*/
+static double varerr(const prcopt_t *opt, double el, int sys, double snr)
 {
     double fact,varr;
     fact=sys==SYS_GLO?EFACT_GLO:(sys==SYS_SBS?EFACT_SBS:EFACT_GPS);
     if (el<MIN_EL) el=MIN_EL;
     varr=SQR(opt->err[0])*(SQR(opt->err[1])+SQR(opt->err[2])/sin(el));
     if (opt->ionoopt==IONOOPT_IFLC) varr*=SQR(3.0); /* iono-free */
-    return SQR(fact)*varr;
+    varr=SQR(fact)*varr;
+    if (opt->weightsnr) varr+=snrvariance(snr,opt);
+    return varr;
 }
 /* get group delay parameter (m) ---------------------------------------------*/
 static double gettgd(int sat, const nav_t *nav, int type)
@@ -320,7 +356,8 @@ static int rescode(int iter, const obsd_t *obs, int n, const double *rs,
         vsat[i]=1; resp[i]=v[nv]; (*ns)++;
         
         /* variance of pseudorange error */
-        var[nv++]=varerr(opt,azel[1+i*2],sys)+vare[i]+vmeas+vion+vtrp;
+        var[nv++]=varerr(opt,azel[1+i*2],sys,
+                         obs[i].SNR[0]*SNR_UNIT)+vare[i]+vmeas+vion+vtrp;
         
         trace(4,"sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n",obs[i].sat,
               azel[i*2]*R2D,azel[1+i*2]*R2D,resp[i],sqrt(var[nv-1]));
@@ -370,40 +407,75 @@ static int estpos(const obsd_t *obs, int n, const double *rs, const double *dts,
                   const prcopt_t *opt, sol_t *sol, double *azel, int *vsat,
                   double *resp, char *msg)
 {
-    double x[NX]={0},dx[NX],Q[NX*NX],*v,*H,*var,sig;
-    int i,j,k,info,stat,nv,ns;
+    double x[NX]={0},dx[NX],Q[NX*NX],*v,*H,*var,*rfact=NULL,*stdres=NULL;
+    double sig,factor;
+    int i,j,k,info=0,stat,nv=0,ns=0,round,nround,changed,converged=0;
     
     trace(3,"estpos  : n=%d\n",n);
     
     v=mat(n+4,1); H=mat(NX,n+4); var=mat(n+4,1);
+    if (opt->robust) {
+        rfact=mat(n+4,1);
+        stdres=mat(n+4,1);
+        for (i=0;i<n+4;i++) rfact[i]=1.0;
+    }
     
     for (i=0;i<3;i++) x[i]=sol->rr[i];
     
-    for (i=0;i<MAXITR;i++) {
-        
-        /* pseudorange residuals (m) */
-        nv=rescode(i,obs,n,rs,dts,vare,svh,nav,x,opt,v,H,var,azel,vsat,resp,
-                   &ns);
-        
-        if (nv<NX) {
-            sprintf(msg,"lack of valid sats ns=%d",nv);
-            break;
+    nround=opt->robust?MAXROBUSTITR:1;
+    for (round=0;round<nround;round++) {
+        converged=0;
+        for (i=0;i<MAXITR;i++) {
+
+            /* pseudorange residuals (m) */
+            nv=rescode(i+(round>0),obs,n,rs,dts,vare,svh,nav,x,opt,v,H,var,
+                       azel,vsat,resp,&ns);
+
+            if (nv<NX) {
+                sprintf(msg,"lack of valid sats ns=%d",nv);
+                break;
+            }
+            /* weighted by Std */
+            for (j=0;j<nv;j++) {
+                if (opt->robust&&j<ns) {
+                    stdres[j]=fabs(v[j])/sqrt(var[j]);
+                    var[j]*=rfact[j];
+                }
+                sig=sqrt(var[j]);
+                v[j]/=sig;
+                for (k=0;k<NX;k++) H[k+j*NX]/=sig;
+            }
+            /* least square estimation */
+            if ((info=lsq(H,v,NX,nv,dx,Q))) {
+                sprintf(msg,"lsq error info=%d",info);
+                break;
+            }
+            for (j=0;j<NX;j++) {
+                x[j]+=dx[j];
+            }
+            if (norm(dx,NX)<1E-4) {
+                converged=1;
+                break;
+            }
         }
-        /* weighted by Std */
-        for (j=0;j<nv;j++) {
-            sig=sqrt(var[j]);
-            v[j]/=sig;
-            for (k=0;k<NX;k++) H[k+j*NX]/=sig;
+        if (!converged) break;
+        if (opt->robust&&round+1<nround) {
+            changed=0;
+            for (j=0;j<ns;j++) {
+                factor=igg3varfactor(stdres[j]);
+                if (factor>1.0) {
+                    trace(4,"estpos robust: round=%d obs=%2d res=%6.2f factor=%.1e\n",
+                          round+1,j,stdres[j],factor);
+                }
+                if (fabs(factor-rfact[j])>
+                    1E-6*(factor>rfact[j]?factor:rfact[j])) {
+                    changed=1;
+                }
+                rfact[j]=factor;
+            }
+            if (changed) continue;
         }
-        /* least square estimation */
-        if ((info=lsq(H,v,NX,nv,dx,Q))) {
-            sprintf(msg,"lsq error info=%d",info);
-            break;
-        }
-        for (j=0;j<NX;j++) {
-            x[j]+=dx[j];
-        }
-        if (norm(dx,NX)<1E-4) {
+        if (converged) {
             sol->type=0;
             sol->time=timeadd(obs[0].time,-x[3]/CLIGHT);
             sol->dtr[0]=x[3]/CLIGHT; /* receiver clock bias (s) */
@@ -423,13 +495,13 @@ static int estpos(const obsd_t *obs, int n, const double *rs, const double *dts,
             if ((stat=valsol(azel,vsat,n,opt,v,nv,NX,msg))) {
                 sol->stat=opt->sateph==EPHOPT_SBAS?SOLQ_SBAS:SOLQ_SINGLE;
             }
-            free(v); free(H); free(var);
+            free(v); free(H); free(var); free(rfact); free(stdres);
             return stat;
         }
     }
     if (i>=MAXITR) sprintf(msg,"iteration divergent i=%d",i);
     
-    free(v); free(H); free(var);
+    free(v); free(H); free(var); free(rfact); free(stdres);
     return 0;
 }
 /* RAIM FDE (failure detection and exclution) -------------------------------*/

@@ -419,6 +419,8 @@ void OptDialog::GetOpt(void)
     Solution	 ->setCurrentIndex(mainForm->Solution);
     ElMask		 ->setCurrentText(QString::number(mainForm->ElMask,'f',0));
     SnrMask						=mainForm->SnrMask;
+    Robust      ->setCurrentIndex(mainForm->Robust);
+    WeightSnr   ->setChecked(mainForm->WeightSnr);
     DynamicModel ->setCurrentIndex(mainForm->DynamicModel);
     TideCorr	 ->setCurrentIndex(mainForm->TideCorr);
     IonoOpt		 ->setCurrentIndex(mainForm->IonoOpt);
@@ -538,6 +540,8 @@ void OptDialog::SetOpt(void)
     mainForm->Solution		=Solution   ->currentIndex();
     mainForm->ElMask		=ElMask	->currentText().toDouble();
     mainForm->SnrMask		=SnrMask;
+    mainForm->Robust		=Robust		->currentIndex();
+    mainForm->WeightSnr		=WeightSnr	->isChecked();
     mainForm->DynamicModel	=DynamicModel->currentIndex();
     mainForm->TideCorr		=TideCorr	->currentIndex();
     mainForm->IonoOpt	  	=IonoOpt	->currentIndex();
@@ -667,6 +671,8 @@ void OptDialog::LoadOpt(const QString &file)
     Solution	 ->setCurrentIndex(prcopt.soltype);
     ElMask		 ->setCurrentText(QString::number(prcopt.elmin*R2D,'f',0));
 	SnrMask						=prcopt.snrmask;
+    Robust      ->setCurrentIndex(prcopt.robust);
+    WeightSnr   ->setChecked(prcopt.weightsnr);
     DynamicModel ->setCurrentIndex(prcopt.dynamics);
     TideCorr	 ->setCurrentIndex(prcopt.tidecorr);
     IonoOpt		 ->setCurrentIndex(prcopt.ionoopt);
@@ -810,6 +816,8 @@ void OptDialog::SaveOpt(const QString &file)
     prcopt.soltype	=Solution	 ->currentIndex();
     prcopt.elmin	=ElMask	->currentText().toDouble()*D2R;
 	prcopt.snrmask	=SnrMask;
+    prcopt.robust	=Robust		->currentIndex();
+    prcopt.weightsnr=WeightSnr	->isChecked();
     prcopt.dynamics	=DynamicModel->currentIndex();
     prcopt.tidecorr	=TideCorr	 ->currentIndex();
     prcopt.ionoopt	=IonoOpt	 ->currentIndex();
