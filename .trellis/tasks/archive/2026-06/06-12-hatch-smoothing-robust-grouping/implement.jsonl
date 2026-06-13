@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "C 核心层规范入口：Phase A 改 rtkpos.c（residualstats/robustddres/diagresiduals 分组）、Phase B 改 postpos.c（smoothcode）前定位归属模块与阅读顺序"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "零回归核心约束：smoothwin=0 + robust=off 默认路径 .pos 与 baseline/ 基线逐字节一致的方法与回归目标"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "选项/配置往返（pos1-smoothwin loadopts/saveopts）、expath WIN32 反斜杠陷阱、-k 最小 conf 重置 posmode 需显式 -p 2——零回归与实验复跑必读"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "C 返回码与失败路径约定：smoothcode() 异常观测（载波缺失/时间间隔异常）与分组统计样本不足的处理"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "RTKLIB trace 级别约定：smoothcode 平滑/重置事件与分组标准化的 trace 输出按级别加"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "src/ 与 tools/matlab/ 布局约定：扩展既有 MATLAB 分析脚本输出 smoothwin STD 对比报表"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Qt GUI 层规范入口（Phase B rtkpost_qt smoothwin 控件）"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "上任务新增的 set/ QSettings 接线清单 Convention：smoothwin 控件持久化逐项对照该清单实现"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Qt 对话框/控件规范：postopt.ui 新增 smoothwin QSpinBox 数值控件"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "C/C++ 边界纪律：QSpinBox 值与 prcopt_t.smoothwin 字段双向映射"}

@@ -1,0 +1,6 @@
+label,epochs,fix_ratio,float_ratio,single_ratio,std_e,std_n,std_u,rms_e,rms_n,rms_u,diag_down_reject_rate,diag_max_var_factor
+robust_only,115,1,0,0,0,0,0,0,0,0,0,1
+weightsnr_only,115,1,0,0,0,0,0,0,0,0,0,1
+robust_weightsnr,115,1,0,0,0,0,0,0,0,0,0,1
+fault_off,105,1,0,0,0,0,0,0,0,0,0,1
+fault_on,115,0.704347826086957,0.295652173913043,0,0.0367778541150359,0.018382330006836,0.045620367221403,0.0418281899035737,0.0187217106111844,0.0455936542113897,0.0137931034482759,1000000

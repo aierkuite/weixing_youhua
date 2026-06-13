@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查依据：零回归（smoothwin=0 + robust=off 逐字节）与既有功能（diag CSV、SNR 定权）不受影响"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查依据：pos1-smoothwin 配置往返一致、实验复跑命令路径反斜杠与 -p 2 显式模式"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查依据：Qt 构建目标、smoothwin 控件保存设置与事件接线、核心/UI 分离"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流检查：pos1-smoothwin 配置 ↔ Qt 控件 ↔ prcopt_t.smoothwin ↔ smoothcode 行为 ↔ 报表指标的一致性；分组标准化在 robustddres 与 diagresiduals 两调用方的一致性"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用检查：residualstats 分组改造被两调用方共用（不复制粘贴统计逻辑）、Qt 持久化沿用上任务 set/ 模式"}
