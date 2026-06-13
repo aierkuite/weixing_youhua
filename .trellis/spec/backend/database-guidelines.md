@@ -51,6 +51,8 @@ When expanding file paths or time-template paths, use the established helpers in
 
 > **Warning**: on WIN32, `expath()` splits the directory part only on `'\\'`. A relative input path written with forward slashes (`../../test/data/x.05o`) silently loses its directory and surfaces as `error : no obs data`. Always pass observation/nav input paths with backslashes on Windows (`..\..\test\data\x.05o`), and reproduce baseline runs with the same separator form recorded in the `.pos` header `% inp file` lines.
 
+> **Warning**: a RINEX observation file can contain code, Doppler, and SNR fields while all carrier phase `L*` fields are blank. Carrier-based preprocessing such as Hatch smoothing must treat that as a graceful no-op, not a failure. Before claiming a smoothing window is ineffective, inspect observation availability by type and confirm whether any usable `L*` samples exist.
+
 ---
 
 ## Generated Files
@@ -156,6 +158,7 @@ Three places must change together, in this order:
 
 ### 6. Tests Required
 - Round-trip: load a conf with the new key, save it back, reload — assert value survives both directions
+- Compile any round-trip helper with the same feature macros as the RTKLIB objects it links against (`NFREQ`, enabled constellations, `WIN32`, `TRACE` when relevant). A helper built with mismatched macros can read the wrong `prcopt_t` layout or option table behavior even though it links
 - Zero regression: switches off (default and explicit-off conf), run fixture datasets, `cmp` the `.pos` byte-for-byte against the archived baseline
 - Option effectiveness: switch on via `-k`, assert the output actually differs from the off run
 

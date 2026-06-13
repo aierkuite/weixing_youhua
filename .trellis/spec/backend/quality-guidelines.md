@@ -68,6 +68,50 @@ On Windows-focused sessions, it is acceptable to document when GCC, make, Qt, C+
 - `-k conf` runs are not byte-comparable to no-conf runs even with identical values: the `-k` path changes header program/time formatting. Compare `-k off.conf` output against a `-k`-produced baseline, and plain runs against plain baselines
 - Both `--diag` on and off must be covered once a feature claims diag is read-only
 
+## Scenario: RTK double-difference robust residual weighting
+
+### 1. Scope / Trigger
+- Trigger: any change to `ddres()`, `robustddres()`, residual diagnostics, or measurement variance scaling in `src/rtkpos.c`
+- These paths directly affect ambiguity convergence and fix ratio, so statistics must respect GNSS residual units and filter phase
+
+### 2. Signatures
+- Residual flag contract: `vflg=(sat1<<16)|(sat2<<8)|(type<<4)|freq`, where `type=0` is carrier phase and `type=1` is code
+- Robust switch: `prcopt_t.robust` / `pos2-robust`
+- Diagnostic output: `sat_diag.csv` `decision`, `reason`, and `var_factor`
+
+### 3. Contracts
+- Carrier phase and code residuals must not share one MAD/median pool: phase residuals are typically millimeter-centimeter scale, while code residuals are meter scale
+- Compute robust center/scale per observation type; if a pool has too few samples, skip that pool instead of falling back to a mixed pool
+- Prefit double-difference phase residuals include unresolved ambiguity and can be meter-level on clean RTK data. Do not apply phase IGG-III downweighting to prefit residuals before ambiguity convergence; code robust weighting may still run prefit for gross code faults
+- Postfit diagnostics should use the same grouping and scale contract as the actual robust weighting path
+- Cap IGG-III variance inflation at the project reject factor so CSV diagnostics and covariance scaling use the same maximum
+
+### 4. Validation & Error Matrix
+- Mixed phase/code MAD pool -> clean RTK `pos2-robust=igg3` may reject many phase residuals and collapse fix ratio
+- Prefit phase IGG-III -> clean RTK may fail ambiguity fixing even when postfit residuals would be healthy
+- Pool sample count <= 2 -> leave that pool untouched for the epoch
+- `robust=off` -> `Ri`/`Rj` and `.pos` output must remain byte-identical to the archived baseline
+
+### 5. Good/Base/Bad Cases
+- Good: clean RTK with `pos2-robust=igg3` keeps fix ratio near the off baseline while injected code faults show `var_factor>1`
+- Base: all robust/SNR/smoothing switches off compares byte-for-byte against baseline `.pos`
+- Bad: one residual statistic over `fabs(v[i])` across both `L` and `P`, or applying phase downweighting during the Kalman prefit call
+
+### 6. Tests Required
+- Clean RTK fixture: assert `robust=igg3` fix ratio remains close to the off baseline
+- Injected code fault fixture: assert the target satellite receives `downweight` or `reject` in `sat_diag.csv` and `diag_max_var_factor>1`
+- Zero regression: run GEOP SPP and RTK fixtures with all switches off and `cmp` outputs against `baseline/`
+
+### 7. Wrong vs Correct
+#### Wrong
+```c
+vals[n++]=fabs(v[i]); /* mixes carrier phase and code residuals */
+```
+#### Correct
+```c
+if (((vflg[i]>>4)&0xF)==type) vals[n++]=v[i];
+```
+
 ---
 
 ## Code Review Checklist
