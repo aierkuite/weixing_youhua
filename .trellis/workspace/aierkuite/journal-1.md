@@ -203,3 +203,37 @@ Added backend-only rnx2rtkp observation diagnostics with diagnostic CSV output, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Hatch 平滑与抗差分组修复
+
+**Date**: 2026-06-13
+**Task**: Hatch 平滑与抗差分组修复
+**Branch**: `main`
+
+### Summary
+
+完成 Hatch 载波平滑、RTK 抗差残差按类型分组修复、Qt smoothwin 接线和相关 spec 约束沉淀；验证零回归、配置往返、console/Qt 构建通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25fde6b` | (see git log) |
+| `5fd0027` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

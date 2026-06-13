@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-06-12
+- **Total Sessions**: 7
+- **Last Active**: 2026-06-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~240 | Active |
+| `journal-1.md` | ~275 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-06-13 | Hatch 平滑与抗差分组修复 | `25fde6b`, `5fd0027` | `main` |
 | 6 | 2026-06-12 | 质量闭环自适应定权 P1c 收尾与交付 | `bb0da87` | `main` |
 | 5 | 2026-06-11 | 质量闭环自适应定权——任务创建与 AC-0 基线 | `-` | `main` |
 | 4 | 2026-06-11 | 修复 rtkpost_qt 诊断 CSV | `6b2d24f` | `feature/first_final` |
