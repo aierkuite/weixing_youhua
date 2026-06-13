@@ -76,6 +76,8 @@
 #define DIAG_SCORE_LOWSNR 35.0 /* 低信噪比评分阈值 */
 #define DIAG_PHASE_RES 0.08  /* 载波相位残差评分尺度 */
 #define DIAG_CODE_RES 5.0    /* 伪距残差评分尺度 */
+#define ROBUST_PHASE_SIG_MIN 0.08 /* 相位残差鲁棒尺度下限(m) */
+#define ROBUST_CODE_SIG_MIN 5.0   /* 伪距残差鲁棒尺度下限(m) */
 
 /* number of parameters (pos,ionos,tropos,hw-bias,phase-bias,real,estimated) */
 #define NF(opt)     ((opt)->ionoopt==IONOOPT_IFLC?1:(opt)->nf)
@@ -233,13 +235,14 @@ static double median(double *data, int n)
 *-----------------------------------------------------------------------------*/
 static double igg3varfactor(double r)
 {
-    double w,t;
+    double w,t,factor;
 
     if (r<=ROBUST_IGG3_K0) return 1.0;
     if (r>ROBUST_IGG3_K1) return ROBUST_REJECT_FACTOR;
     t=(ROBUST_IGG3_K1-r)/(ROBUST_IGG3_K1-ROBUST_IGG3_K0);
     w=(ROBUST_IGG3_K0/r)*t*t;
-    return w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+    factor=w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+    return factor<ROBUST_REJECT_FACTOR?factor:ROBUST_REJECT_FACTOR;
 }
 /* 计算SNR随机模型方差 ---------------------------------------------------------
 * 根据信噪比计算附加观测方差
@@ -252,34 +255,38 @@ static double snrvariance(double snr, const prcopt_t *opt)
     if (!opt||!opt->weightsnr||snr<=0.0) return 0.0;
     return SQR(WEIGHTSNR_ERR)*pow(10.0,(WEIGHTSNR_REF-snr)/10.0);
 }
-/* 计算双差残差鲁棒统计量 ------------------------------------------------------
-* 从有效双差残差计算中位数和MAD尺度
+/* 计算指定类型双差残差鲁棒统计量 ---------------------------------------------
+* 从有效双差残差中按观测类型计算中心值和MAD尺度
 * args   : double *v        I   残差向量
 *          int    *vflg     I   残差标志
 *          int    nv        I   残差数量
-*          double *med      O   残差绝对值中位数
+*          int    type      I   观测类型(0:相位,1:伪距)
+*          double *med      O   残差中位数
 *          double *sigma    O   MAD换算尺度
 * return : 1表示统计量有效，0表示样本不足
 *-----------------------------------------------------------------------------*/
 static int residualstats(const double *v, const int *vflg, int nv,
-                         double *med, double *sigma)
+                         int type, double *med, double *sigma)
 {
-    double vals[MAXOBS*NFREQ*2+1],dev[MAXOBS*NFREQ*2+1],mad;
-    int i,n,sat1,sat2;
+    double vals[MAXOBS*NFREQ*2+1],dev[MAXOBS*NFREQ*2+1],mad,sigmin;
+    int i,n,sat1,sat2,vtype;
 
     if (nv<=2) return 0;
     for (i=n=0;i<nv;i++) {
         sat1=(vflg[i]>>16)&0xFF;
         sat2=(vflg[i]>> 8)&0xFF;
+        vtype=(vflg[i]>>4)&0xF;
         if (sat1<=0||sat2<=0) continue;
-        vals[n++]=fabs(v[i]);
+        if (vtype!=type) continue;
+        vals[n++]=v[i];
     }
     if (n<=2) return 0;
     *med=median(vals,n);
     for (i=0;i<n;i++) dev[i]=fabs(vals[i]-*med);
     mad=median(dev,n);
     *sigma=1.4826*mad;
-    if (*sigma<1E-4) *sigma=1E-4;
+    sigmin=type==0?ROBUST_PHASE_SIG_MIN:ROBUST_CODE_SIG_MIN;
+    if (*sigma<sigmin) *sigma=sigmin;
     return 1;
 }
 /* 标记诊断决策 ----------------------------------------------------------------
@@ -347,22 +354,27 @@ static int diagvsat(const rtk_t *rtk, const ssat_t *ssat, int freq)
 *          double *Rj       IO  卫星j测量方差
 *          int    *vflg     I   残差标志
 *          int    nv        I   残差数量
+*          int    prefit    I   1表示滤波前残差
 * return : 无
 *-----------------------------------------------------------------------------*/
 static void robustddres(const prcopt_t *opt, const double *v, double *Ri,
-                        double *Rj, const int *vflg, int nv)
+                        double *Rj, const int *vflg, int nv, int prefit)
 {
-    double med,sigma,r,factor;
-    int i,sat1,sat2,freq;
+    double med[2],sigma[2],r,factor;
+    int valid[2],i,sat1,sat2,type,freq;
 
     if (!opt||!opt->robust) return;
-    if (!residualstats(v,vflg,nv,&med,&sigma)) return;
+    valid[0]=residualstats(v,vflg,nv,0,med  ,sigma  );
+    valid[1]=residualstats(v,vflg,nv,1,med+1,sigma+1);
 
     for (i=0;i<nv;i++) {
         sat1=(vflg[i]>>16)&0xFF;
         sat2=(vflg[i]>> 8)&0xFF;
+        type=(vflg[i]>> 4)&0xF;
         if (sat1<=0||sat2<=0) continue;
-        r=(fabs(v[i])-med)/sigma;
+        if (type<0||type>1||!valid[type]) continue;
+        if (prefit&&type==0) continue;
+        r=fabs(v[i]-med[type])/sigma[type];
         factor=igg3varfactor(r);
         if (factor<=1.0) continue;
         Ri[i]*=factor;
@@ -386,26 +398,31 @@ static void robustddres(const prcopt_t *opt, const double *v, double *Ri,
 * args   : double *v        I   残差向量
 *          int    *vflg     I   残差标志
 *          int    nv        I   残差数量
+*          int    prefit    I   1表示滤波前残差
 * return : 无
 *-----------------------------------------------------------------------------*/
-static void diagresiduals(const double *v, const int *vflg, int nv)
+static void diagresiduals(const double *v, const int *vflg, int nv, int prefit)
 {
-    double med,sigma,r;
+    double med[2],sigma[2],r;
+    int valid[2];
     int i,sat1,sat2,type,freq,decision;
     const char *reason;
 
     if (!diag_enabled) return;
-    if (!residualstats(v,vflg,nv,&med,&sigma)) return;
+    valid[0]=residualstats(v,vflg,nv,0,med  ,sigma  );
+    valid[1]=residualstats(v,vflg,nv,1,med+1,sigma+1);
 
     for (i=0;i<nv;i++) {
         sat1=(vflg[i]>>16)&0xFF;
         sat2=(vflg[i]>> 8)&0xFF;
         if (sat1<=0||sat2<=0) continue;
-        r=(fabs(v[i])-med)/sigma;
-        if (igg3varfactor(r)<=1.0) continue;
         type=(vflg[i]>> 4)&0xF;
         freq=vflg[i]&0xF;
+        if (type<0||type>1||!valid[type]) continue;
         if (freq<0||freq>=NFREQ) continue;
+        if (prefit&&type==0) continue;
+        r=fabs(v[i]-med[type])/sigma[type];
+        if (igg3varfactor(r)<=1.0) continue;
         decision=r>ROBUST_IGG3_K1?RTKDIAG_REJECT:RTKDIAG_DOWNWEIGHT;
         reason=type==0?"large_phase_residual":"large_code_residual";
         markdiag(sat1,freq,decision,reason);
@@ -1668,10 +1685,10 @@ static int ddres(rtk_t *rtk, const obsd_t *obs, const nav_t *nav, double dt,
     if (H) {trace(5,"H=\n"); tracemat(5,H,rtk->nx,nv,7,4);}
     
     /* 抗差选项启用时根据当前历元残差分布调整双差方差 */
-    robustddres(opt,v,Ri,Rj,vflg,nv);
+    robustddres(opt,v,Ri,Rj,vflg,nv,H!=NULL);
 
     /* 诊断启用时只记录残差异常，不改变解算权重 */
-    diagresiduals(v,vflg,nv);
+    diagresiduals(v,vflg,nv,H!=NULL);
 
     /* DD measurement error covariance */
     ddcov(nb,b,Ri,Rj,nv,R);

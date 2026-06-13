@@ -320,6 +320,7 @@ extern int loadopts(const char *file, opt_t *opts)
     FILE *fp;
     opt_t *opt;
     char buff[2048],*p;
+    unsigned char *q;
     int n=0;
     
     trace(3,"loadopts: file=%s\n",file);
@@ -330,6 +331,13 @@ extern int loadopts(const char *file, opt_t *opts)
     }
     while (fgets(buff,sizeof(buff),fp)) {
         n++;
+        if (n==1&&strlen(buff)>=3) {
+            q=(unsigned char *)buff;
+            /* 跳过UTF-8 BOM，避免首行选项名匹配失败 */
+            if (q[0]==0xEF&&q[1]==0xBB&&q[2]==0xBF) {
+                memmove(buff,buff+3,strlen(buff+3)+1);
+            }
+        }
         chop(buff);
         
         if (buff[0]=='\0') continue;

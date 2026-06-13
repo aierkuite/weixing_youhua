@@ -194,7 +194,7 @@ MainForm::MainForm(QWidget *parent)
     IniFile=fi.absolutePath()+"/"+fi.baseName()+".ini";
     
     DynamicModel=IonoOpt=TropOpt=RovAntPcv=RefAntPcv=AmbRes=0;
-    Robust=WeightSnr=0;
+    Robust=WeightSnr=SmoothWin=0;
     RovPosType=RefPosType=0;
     OutCntResetAmb=5; LockCntFixAmb=5; FixCntHoldAmb=10;
     MaxAgeDiff=30.0; RejectThres=30.0; RejectGdop=30.0;
@@ -969,6 +969,7 @@ int MainForm::GetOption(prcopt_t &prcopt, solopt_t &solopt,
     prcopt.snrmask  =SnrMask;
     prcopt.robust   =Robust;
     prcopt.weightsnr=WeightSnr;
+    prcopt.smoothwin=SmoothWin;
     prcopt.sateph   =SatEphem;
     prcopt.modear   =AmbRes;
     prcopt.glomodear=GloAmbRes;
@@ -1331,6 +1332,7 @@ void MainForm::LoadOpt(void)
     DiagDir->setText(LocalFilePath(ini.value ("set/diagdir",     "").toString()));
     Robust=ini.value("set/robust",0).toInt();
     WeightSnr=ini.value("set/weightsnr",0).toInt();
+    SmoothWin=ini.value("set/smoothwin",0).toInt();
     OutputFile->setCurrentText(LocalFilePath(ini.value ("set/outputfile",  "").toString()));
     
     ReadList(InputFile1,&ini,"hist/inputfile1");
@@ -1521,6 +1523,7 @@ void MainForm::SaveOpt(void)
     ini.setValue ("set/diagdir",     LocalFilePath(DiagDir   ->text()));
     ini.setValue("set/robust",      Robust);
     ini.setValue("set/weightsnr",   WeightSnr);
+    ini.setValue("set/smoothwin",   SmoothWin);
     ini.setValue ("set/outputfile",  LocalFilePath(OutputFile->currentText()));
     
     WriteList(&ini,"hist/inputfile1",     InputFile1);

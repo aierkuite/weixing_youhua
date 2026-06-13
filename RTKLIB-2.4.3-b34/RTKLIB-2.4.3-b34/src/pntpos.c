@@ -52,13 +52,14 @@
 *-----------------------------------------------------------------------------*/
 static double igg3varfactor(double r)
 {
-    double w,t;
+    double w,t,factor;
 
     if (r<=ROBUST_IGG3_K0) return 1.0;
     if (r>ROBUST_IGG3_K1) return ROBUST_REJECT_FACTOR;
     t=(ROBUST_IGG3_K1-r)/(ROBUST_IGG3_K1-ROBUST_IGG3_K0);
     w=(ROBUST_IGG3_K0/r)*t*t;
-    return w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+    factor=w>1E-12?1.0/w:ROBUST_REJECT_FACTOR;
+    return factor<ROBUST_REJECT_FACTOR?factor:ROBUST_REJECT_FACTOR;
 }
 /* 计算SNR随机模型方差 ---------------------------------------------------------
 * 根据信噪比计算附加伪距方差

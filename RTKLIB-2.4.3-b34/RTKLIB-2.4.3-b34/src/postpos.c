@@ -324,6 +324,183 @@ static void corr_phase_bias_ssr(obsd_t *obs, int n, const nav_t *nav)
         obs[i].L[j]-=nav->ssr[obs[i].sat-1].pbias[code-1]*freq/CLIGHT;
     }
 }
+typedef struct {        /* Hatch平滑通道状态 */
+    int valid;          /* 1:状态有效 */
+    int n;              /* 平滑计数 */
+    gtime_t time;       /* 上一观测时间 */
+    double phase;       /* 上一载波相位距离(m) */
+    double psmooth;     /* 上一平滑伪距(m) */
+} smoothstat_t;
+/* 比较采样间隔 ---------------------------------------------------------------
+* 供qsort按升序排列采样间隔
+* args   : void   *a        I   第一个采样间隔
+*          void   *b        I   第二个采样间隔
+* return : -1表示a<b，1表示a>b，0表示相等
+*-----------------------------------------------------------------------------*/
+static int smoothcmpdouble(const void *a, const void *b)
+{
+    double x=*(const double *)a,y=*(const double *)b;
+    return x<y?-1:(x>y?1:0);
+}
+/* 平滑状态数组索引 ------------------------------------------------------------
+* 计算接收机、卫星和频点对应的Hatch平滑状态下标
+* args   : int    rcv       I   接收机编号(1-MAXRCV)
+*          int    sat       I   卫星编号(1-MAXSAT)
+*          int    freq      I   频点索引
+*          int    nf        I   每通道频点数量
+* return : 状态数组下标
+*-----------------------------------------------------------------------------*/
+static int smoothidx(int rcv, int sat, int freq, int nf)
+{
+    return (((rcv-1)*MAXSAT+(sat-1))*nf+freq);
+}
+/* 估计接收机标称采样间隔 ------------------------------------------------------
+* 从已排序观测中提取每个接收机相邻历元间隔的中位数
+* args   : obs_t  *obs      I   观测数据
+*          double *tint     O   各接收机标称采样间隔
+* return : 1表示成功，0表示内存不足
+*-----------------------------------------------------------------------------*/
+static int smoothsampleint(const obs_t *obs, double *tint)
+{
+    gtime_t last[MAXRCV+1]={{0}};
+    int have[MAXRCV+1]={0};
+    int count[MAXRCV+1]={0},offset[MAXRCV+2]={0},cursor[MAXRCV+1]={0};
+    double *dt,tt;
+    int i,rcv,total;
+
+    for (i=0;i<=MAXRCV;i++) tint[i]=0.0;
+    for (i=0;i<obs->n;i++) {
+        rcv=obs->data[i].rcv;
+        if (rcv<=0||rcv>MAXRCV) continue;
+        if (have[rcv]) {
+            tt=timediff(obs->data[i].time,last[rcv]);
+            if (tt>DTTOL) count[rcv]++;
+            if (fabs(tt)>DTTOL) last[rcv]=obs->data[i].time;
+        }
+        else {
+            last[rcv]=obs->data[i].time;
+            have[rcv]=1;
+        }
+    }
+    for (rcv=1;rcv<=MAXRCV;rcv++) offset[rcv+1]=offset[rcv]+count[rcv];
+    total=offset[MAXRCV+1];
+    if (total<=0) return 1;
+    if (!(dt=(double *)malloc(sizeof(double)*total))) {
+        showmsg("error : smoothsampleint memory allocation");
+        trace(1,"error : smoothsampleint memory allocation\n");
+        return 0;
+    }
+    for (rcv=1;rcv<=MAXRCV;rcv++) cursor[rcv]=offset[rcv];
+    for (i=0;i<=MAXRCV;i++) { last[i].time=0; last[i].sec=0.0; have[i]=0; }
+    for (i=0;i<obs->n;i++) {
+        rcv=obs->data[i].rcv;
+        if (rcv<=0||rcv>MAXRCV) continue;
+        if (have[rcv]) {
+            tt=timediff(obs->data[i].time,last[rcv]);
+            if (tt>DTTOL) dt[cursor[rcv]++]=tt;
+            if (fabs(tt)>DTTOL) last[rcv]=obs->data[i].time;
+        }
+        else {
+            last[rcv]=obs->data[i].time;
+            have[rcv]=1;
+        }
+    }
+    for (rcv=1;rcv<=MAXRCV;rcv++) {
+        if (count[rcv]<=0) continue;
+        qsort(dt+offset[rcv],count[rcv],sizeof(double),smoothcmpdouble);
+        if (count[rcv]%2) tint[rcv]=dt[offset[rcv]+count[rcv]/2];
+        else tint[rcv]=(dt[offset[rcv]+count[rcv]/2-1]+
+                        dt[offset[rcv]+count[rcv]/2])/2.0;
+    }
+    free(dt);
+    return 1;
+}
+/* 重置Hatch平滑通道 -----------------------------------------------------------
+* 用当前观测初始化通道状态并保持当前历元伪距原值
+* args   : smoothstat_t *stat IO  通道状态
+*          gtime_t time       I   当前观测时间
+*          double phase       I   当前载波相位距离
+*          double code        I   当前伪距
+* return : 无
+*-----------------------------------------------------------------------------*/
+static void resetsmooth(smoothstat_t *stat, gtime_t time, double phase,
+                        double code)
+{
+    stat->valid=1;
+    stat->n=1;
+    stat->time=time;
+    stat->phase=phase;
+    stat->psmooth=code;
+}
+/* Hatch载波平滑伪距 -----------------------------------------------------------
+* 按接收机、卫星和频点独立执行后处理Hatch载波平滑
+* args   : obs_t    *obs     IO  观测数据，启用时原位改写伪距
+*          nav_t    *nav     I   导航数据，用于载波频率换算
+*          prcopt_t *opt     I   处理选项，smoothwin>=2时启用
+* return : 1表示成功或旁路，0表示内存不足
+*-----------------------------------------------------------------------------*/
+static int smoothcode(obs_t *obs, const nav_t *nav, const prcopt_t *opt)
+{
+    smoothstat_t *stat,*s;
+    double tint[MAXRCV+1],freq,phase,ps,tt;
+    int i,j,rcv,sat,nf=NFREQ+NEXOBS,nwin;
+    int nreset=0,ngap=0,nlli=0,nmissp=0,nmissl=0,nupdate=0;
+
+    if (!opt||opt->smoothwin<2) return 1;
+    if (!obs||!obs->data||obs->n<=0) return 1;
+    nwin=opt->smoothwin;
+    if (!smoothsampleint(obs,tint)) return 0;
+    if (!(stat=(smoothstat_t *)calloc(MAXRCV*MAXSAT*nf,sizeof(smoothstat_t)))) {
+        showmsg("error : smoothcode memory allocation");
+        trace(1,"error : smoothcode memory allocation\n");
+        return 0;
+    }
+    trace(3,"smoothcode: nobs=%d win=%d\n",obs->n,nwin);
+
+    for (i=0;i<obs->n;i++) {
+        rcv=obs->data[i].rcv;
+        sat=obs->data[i].sat;
+        if (rcv<=0||rcv>MAXRCV||sat<=0||sat>MAXSAT) continue;
+        for (j=0;j<nf;j++) {
+            s=stat+smoothidx(rcv,sat,j,nf);
+            if (obs->data[i].P[j]==0.0) {
+                s->valid=0;
+                nmissp++;
+                continue;
+            }
+            if (obs->data[i].L[j]==0.0||
+                (freq=sat2freq(sat,obs->data[i].code[j],nav))==0.0) {
+                s->valid=0;
+                nmissl++;
+                continue;
+            }
+            phase=obs->data[i].L[j]*CLIGHT/freq;
+            tt=s->valid?timediff(obs->data[i].time,s->time):0.0;
+
+            /* 失锁或通道中断时当前伪距保持原值并重启计数 */
+            if (!s->valid||obs->data[i].LLI[j]||
+                (tint[rcv]>0.0&&tt>tint[rcv]*1.5+DTTOL)) {
+                if (s->valid&&obs->data[i].LLI[j]) nlli++;
+                else if (s->valid&&tint[rcv]>0.0&&tt>tint[rcv]*1.5+DTTOL) ngap++;
+                else nreset++;
+                resetsmooth(s,obs->data[i].time,phase,obs->data[i].P[j]);
+                continue;
+            }
+            s->n=s->n<nwin?s->n+1:nwin;
+            ps=obs->data[i].P[j]/s->n+
+               (s->n-1.0)/s->n*(s->psmooth+(phase-s->phase));
+            obs->data[i].P[j]=ps;
+            s->time=obs->data[i].time;
+            s->phase=phase;
+            s->psmooth=ps;
+            nupdate++;
+        }
+    }
+    trace(3,"smoothcode: update=%d reset=%d gap=%d lli=%d missP=%d missL=%d\n",
+          nupdate,nreset,ngap,nlli,nmissp,nmissl);
+    free(stat);
+    return 1;
+}
 /* process positioning -------------------------------------------------------*/
 static void procpos(FILE *fp, const prcopt_t *popt, const solopt_t *sopt,
                     int mode)
@@ -941,6 +1118,10 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     }
     /* read obs and nav data */
     if (!readobsnav(ts,te,ti,infile,index,n,&popt_,&obss,&navs,stas)) return 0;
+    if (!smoothcode(&obss,&navs,&popt_)) {
+        freeobsnav(&obss,&navs);
+        return 0;
+    }
     
     /* read dcb parameters */
     if (*fopt->dcb) {
