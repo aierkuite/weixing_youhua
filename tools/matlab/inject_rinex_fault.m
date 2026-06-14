@@ -1,9 +1,13 @@
 function stats = inject_rinex_fault(inputFile, outputFile, varargin)
-%INJECT_RINEX_FAULT 向RINEX OBS文件注入伪距阶跃粗差和SNR压低
+%INJECT_RINEX_FAULT 向RINEX OBS文件注入伪距阶跃、SNR压低或载波周跳
 % args   : char/string inputFile   I   输入RINEX OBS文件路径
 %          char/string outputFile  I   输出RINEX OBS文件路径
-%          Name-Value varargin     I   可选参数，Satellite、StartTime、EndTime、CodeBias、SnrDrop、Systems、Codes
+%          Name-Value varargin     I   可选参数，Mode、Satellite、StartTime、EndTime、CodeBias、SnrDrop、Systems、Codes、L1Slip、L2Slip
 % return : table stats             O   每颗卫星被修改的记录数统计
+%
+% Mode="code"保留原行为，对伪距加CodeBias并压低SNR
+% Mode="cycle-slip"对L1/L2载波相位加整周跳，默认L1+9周、L2+7周为GF盲区组合
+% Mode="both"同时注入伪距/SNR故障和载波周跳
 
 opts = parseOptions(varargin{:});
 lines = readTextLines(inputFile);
@@ -59,6 +63,7 @@ function opts = parseOptions(varargin)
 % return : struct opts         O   注入参数结构
 
 p = inputParser;
+addParameter(p, 'Mode', "code", @(x) ischar(x) || isstring(x));
 addParameter(p, 'Satellite', "", @(x) ischar(x) || isstring(x) || iscellstr(x));
 addParameter(p, 'StartTime', NaT, @(x) isdatetime(x) || ischar(x) || isstring(x));
 addParameter(p, 'EndTime', NaT, @(x) isdatetime(x) || ischar(x) || isstring(x));
@@ -66,8 +71,11 @@ addParameter(p, 'CodeBias', 30.0, @isnumeric);
 addParameter(p, 'SnrDrop', 15.0, @isnumeric);
 addParameter(p, 'Systems', "G", @(x) ischar(x) || isstring(x));
 addParameter(p, 'Codes', ["C1C","C1P","C1","P1"], @(x) ischar(x) || isstring(x) || iscellstr(x));
+addParameter(p, 'L1Slip', 9.0, @isnumeric);
+addParameter(p, 'L2Slip', 7.0, @isnumeric);
 parse(p, varargin{:});
 opts = p.Results;
+opts.Mode = normalizeMode(opts.Mode);
 opts.Satellite = normalizeStringList(opts.Satellite);
 opts.Systems = char(string(opts.Systems));
 opts.Codes = normalizeStringList(opts.Codes);
@@ -75,6 +83,23 @@ opts.StartTime = normalizeTime(opts.StartTime);
 opts.EndTime = normalizeTime(opts.EndTime);
 opts.CodeBias = double(opts.CodeBias);
 opts.SnrDrop = double(opts.SnrDrop);
+opts.L1Slip = double(opts.L1Slip);
+opts.L2Slip = double(opts.L2Slip);
+end
+
+function mode = normalizeMode(mode)
+%NORMALIZEMODE 标准化故障注入模式
+% args   : char/string mode I   原始模式文本
+% return : string mode      O   标准化模式，取值code、cycle-slip或both
+
+mode = lower(strtrim(string(mode)));
+if mode == "cycleslip" || mode == "cycle_slip"
+    mode = "cycle-slip";
+end
+valid = ["code","cycle-slip","both"];
+if ~any(mode == valid)
+    error('inject_rinex_fault:mode', 'Mode必须为code、cycle-slip或both');
+end
 end
 
 function values = normalizeStringList(value)
@@ -386,6 +411,8 @@ function [satLines, changed] = editObservationLines(satLines, types, opts, versi
 %          logical changed O 是否发生修改
 
 changed = false;
+editCode = opts.Mode == "code" || opts.Mode == "both";
+editSlip = opts.Mode == "cycle-slip" || opts.Mode == "both";
 paddedLines = padLine(satLines, 80);
 flat = [paddedLines{:}];
 if isempty(flat)
@@ -408,19 +435,44 @@ for j = 1:numel(types)
     if isnan(value)
         continue
     end
-    if startsWith(type, 'C') || startsWith(type, 'P')
+    if editCode && (startsWith(type, 'C') || startsWith(type, 'P'))
         if isempty(opts.Codes) || any(opts.Codes == type) || any(opts.Codes == extractBefore(type, 3))
             value = value + opts.CodeBias;
             flat(pos:pos+13) = char(formatObsValue(value));
             changed = true;
         end
-    elseif startsWith(type, 'S')
+    elseif editCode && startsWith(type, 'S')
         value = max(0, value - opts.SnrDrop);
         flat(pos:pos+13) = char(formatObsValue(value));
         changed = true;
+    elseif editSlip && startsWith(type, 'L')
+        slip = carrierSlipCycles(type, opts);
+        if slip ~= 0.0
+            value = value + slip;
+            flat(pos:pos+13) = char(formatObsValue(value));
+            changed = true;
+        end
     end
 end
 satLines = reshapeObservationText(flat, numel(satLines), version);
+end
+
+function slip = carrierSlipCycles(type, opts)
+%CARRIERSLIPCYCLES 返回指定载波观测类型需要注入的整周跳
+% args   : string type I   RINEX观测类型，例如L1C或L2W
+%          struct opts I   注入参数结构
+% return : double slip O   需要叠加到载波相位字段的周数
+
+text = char(type);
+slip = 0.0;
+if numel(text) < 2
+    return
+end
+if text(2) == '1'
+    slip = opts.L1Slip;
+elseif text(2) == '2'
+    slip = opts.L2Slip;
+end
 end
 
 function value = formatObsValue(x)

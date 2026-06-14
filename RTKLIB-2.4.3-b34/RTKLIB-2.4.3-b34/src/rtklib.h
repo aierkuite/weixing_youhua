@@ -1029,6 +1029,8 @@ typedef struct {        /* processing options type */
     int  robust;        /* 抗差定权模式 (0:off,1:IGG-III) */
     int  weightsnr;     /* SNR随机模型开关 (0:off,1:on) */
     int  smoothwin;     /* Hatch平滑窗口历元数 (0:off,>=2:on) */
+    int  slipmw;        /* MW宽巷周跳检测开关 (0:off,1:on) */
+    int  arwl;          /* 宽巷辅助模糊度解算开关 (0:off,1:on) */
 } prcopt_t;
 
 typedef struct {        /* solution options type */
@@ -1126,6 +1128,8 @@ typedef struct {        /* satellite status type */
     uint32_t rejc [NFREQ]; /* reject counter */
     double gf[NFREQ-1]; /* geometry-free phase (m) */
     double mw[NFREQ-1]; /* MW-LC (m) */
+    double mwm[NFREQ-1]; /* MW滑动均值 (m) */
+    uint32_t mwc[NFREQ-1]; /* MW平滑计数 */
     double phw;         /* phase windup (cycle) */
     gtime_t pt[2][NFREQ]; /* previous carrier-phase time */
     double ph[2][NFREQ]; /* previous carrier-phase observable (cycle) */
