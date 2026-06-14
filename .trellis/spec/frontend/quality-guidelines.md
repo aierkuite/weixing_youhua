@@ -61,6 +61,12 @@ If the local environment cannot build GUI targets, perform a source-level check:
 
 For shared core changes that affect GUI behavior, also run the relevant command-line or unit tests from `app/consapp/` or `test/utest/`.
 
+> **Warning**: `rtkpost_qt` command-line options prefill the form and load `.ini`
+> state; they do not automatically execute post-processing. GUI/console parity
+> tests require a visible manual run or UI automation that clicks Execute. If
+> only source-level validation is possible, record that limitation and at least
+> verify the rebuilt executable contains the new QSettings and conf key strings.
+
 ---
 
 ## Code Review Checklist

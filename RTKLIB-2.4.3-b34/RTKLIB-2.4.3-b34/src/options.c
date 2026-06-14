@@ -110,6 +110,8 @@ EXPORT opt_t sysopts[]={
     {"pos2-rejgdop",    1,  (void *)&prcopt_.maxgdop,    ""     },
     {"pos2-niter",      0,  (void *)&prcopt_.niter,      ""     },
     {"pos2-robust",     3,  (void *)&prcopt_.robust,     ROBOPT },
+    {"pos2-slipmw",     3,  (void *)&prcopt_.slipmw,     SWTOPT },
+    {"pos2-arwl",       3,  (void *)&prcopt_.arwl,       SWTOPT },
     {"pos2-baselen",    1,  (void *)&prcopt_.baseline[0],"m"    },
     {"pos2-basesig",    1,  (void *)&prcopt_.baseline[1],"m"    },
     

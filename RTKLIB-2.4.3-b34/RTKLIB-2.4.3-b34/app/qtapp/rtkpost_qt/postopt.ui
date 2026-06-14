@@ -846,6 +846,45 @@
          </property>
         </widget>
        </item>
+       <item row="10" column="0">
+        <widget class="QLabel" name="LabelWideLane">
+         <property name="enabled">
+          <bool>true</bool>
+         </property>
+         <property name="toolTip">
+          <string/>
+         </property>
+         <property name="text">
+          <string>MW Slip / Wide-Lane AR</string>
+         </property>
+        </widget>
+       </item>
+       <item row="10" column="1">
+        <widget class="QCheckBox" name="SlipMw">
+         <property name="toolTip">
+          <string>Melbourne-Wubbena cycle-slip detection</string>
+         </property>
+         <property name="text">
+          <string>MW Slip</string>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </item>
+       <item row="10" column="2">
+        <widget class="QCheckBox" name="ArWl">
+         <property name="toolTip">
+          <string>Wide-lane assisted ambiguity resolution</string>
+         </property>
+         <property name="text">
+          <string>WL AR</string>
+         </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </item>
        <item row="12" column="0">
         <widget class="QLabel" name="Label35">
          <property name="enabled">

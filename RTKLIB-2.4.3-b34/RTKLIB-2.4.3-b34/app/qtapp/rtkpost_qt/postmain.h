@@ -138,7 +138,7 @@ public:
 	
 	// options
 	int PosMode,Freq,Solution,DynamicModel,IonoOpt,TropOpt,RcvBiasEst;
-	int Robust,WeightSnr,SmoothWin;
+	int Robust,WeightSnr,SmoothWin,SlipMw,ArWl;
 	int ARIter,NumIter,CodeSmooth,TideCorr;
 	int OutCntResetAmb,FixCntHoldAmb,LockCntFixAmb,RovPosType,RefPosType;
 	int SatEphem,NavSys;

@@ -422,6 +422,8 @@ void OptDialog::GetOpt(void)
     Robust      ->setCurrentIndex(mainForm->Robust);
     WeightSnr   ->setChecked(mainForm->WeightSnr);
     SmoothWin   ->setValue(mainForm->SmoothWin);
+    SlipMw      ->setChecked(mainForm->SlipMw);
+    ArWl        ->setChecked(mainForm->ArWl);
     DynamicModel ->setCurrentIndex(mainForm->DynamicModel);
     TideCorr	 ->setCurrentIndex(mainForm->TideCorr);
     IonoOpt		 ->setCurrentIndex(mainForm->IonoOpt);
@@ -544,6 +546,8 @@ void OptDialog::SetOpt(void)
     mainForm->Robust		=Robust		->currentIndex();
     mainForm->WeightSnr		=WeightSnr	->isChecked();
     mainForm->SmoothWin		=SmoothWin	->value();
+    mainForm->SlipMw		=SlipMw		->isChecked();
+    mainForm->ArWl			=ArWl		->isChecked();
     mainForm->DynamicModel	=DynamicModel->currentIndex();
     mainForm->TideCorr		=TideCorr	->currentIndex();
     mainForm->IonoOpt	  	=IonoOpt	->currentIndex();
@@ -676,6 +680,8 @@ void OptDialog::LoadOpt(const QString &file)
     Robust      ->setCurrentIndex(prcopt.robust);
     WeightSnr   ->setChecked(prcopt.weightsnr);
     SmoothWin   ->setValue(prcopt.smoothwin);
+    SlipMw      ->setChecked(prcopt.slipmw);
+    ArWl        ->setChecked(prcopt.arwl);
     DynamicModel ->setCurrentIndex(prcopt.dynamics);
     TideCorr	 ->setCurrentIndex(prcopt.tidecorr);
     IonoOpt		 ->setCurrentIndex(prcopt.ionoopt);
@@ -822,6 +828,8 @@ void OptDialog::SaveOpt(const QString &file)
     prcopt.robust	=Robust		->currentIndex();
     prcopt.weightsnr=WeightSnr	->isChecked();
     prcopt.smoothwin=SmoothWin	->value();
+    prcopt.slipmw	=SlipMw		->isChecked();
+    prcopt.arwl		=ArWl		->isChecked();
     prcopt.dynamics	=DynamicModel->currentIndex();
     prcopt.tidecorr	=TideCorr	 ->currentIndex();
     prcopt.ionoopt	=IonoOpt	 ->currentIndex();
@@ -965,6 +973,9 @@ void OptDialog::UpdateEnable(void)
     FixCntHoldAmb  ->setEnabled(ar&&AmbRes->currentIndex()==3);
     ElMaskHold     ->setEnabled(ar&&AmbRes->currentIndex()==3);
     SlipThres      ->setEnabled(rtk||ppp);
+    LabelWideLane  ->setEnabled(rtk&&Freq->currentIndex()>=1);
+    SlipMw         ->setEnabled(rtk&&Freq->currentIndex()>=1);
+    ArWl           ->setEnabled(rtk&&Freq->currentIndex()>=1&&AmbRes->currentIndex()>0);
     MaxAgeDiff     ->setEnabled(rel);
     RejectThres    ->setEnabled(rel||ppp);
     ARIter         ->setEnabled(ppp);

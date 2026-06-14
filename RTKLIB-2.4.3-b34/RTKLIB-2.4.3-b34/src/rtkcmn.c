@@ -223,7 +223,7 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     0,0,0,                      /* 最大平均历元,初始化复位,单点输出 */
     {"",""},                    /* RINEX选项 */
     {0},0,{{0}},0,"",           /* 定位选项,同步解,海潮位移,频率选项,PPP选项 */
-    0,0,0                       /* 抗差定权,SNR定权,Hatch平滑 */
+    0,0,0,0,0                   /* 抗差定权,SNR定权,Hatch平滑,MW周跳,宽巷AR */
 };
 const solopt_t solopt_default={ /* defaults solution output options */
     SOLF_LLH,TIMES_GPST,1,3,    /* posf,times,timef,timeu */

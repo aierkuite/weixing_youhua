@@ -174,6 +174,65 @@ Three places must change together, in this order:
 ./rnx2rtkp.exe -p 2 -k on.conf rover.obs base.nav base.obs -o out.pos
 ```
 
+## Scenario: RTK MW slip detection and wide-lane AR switches
+
+### 1. Scope / Trigger
+- Trigger: task 06-13 added RTK relative-positioning switches for Melbourne-Wubbena slip detection and wide-lane-assisted ambiguity resolution
+- These switches affect `prcopt_t`, `ssat_t`, `sysopts[]`, diagnostic reasons, MATLAB validation tools, and Qt option state, so the executable contract must be captured across config and generated-output boundaries
+
+### 2. Signatures
+- Core fields: `prcopt_t.slipmw` and `prcopt_t.arwl`, both integer switches with `0=off` and `1=on`
+- Satellite state: `ssat_t.mwm[NFREQ-1]` stores the MW sliding mean in meters, and `ssat_t.mwc[NFREQ-1]` stores the smoothing count
+- Config keys: `pos2-slipmw` and `pos2-arwl`, both encoded with the standard switch option table (`0:off,1:on`)
+- Diagnostic reason: MW slip detection writes `cycle_slip_mw` through existing `sat_diag.csv` `decision/reason` fields; the CSV header must not change
+- Qt settings keys: `set/slipmw` and `set/arwl` mirror the core switches for `rtkpost_qt`
+
+### 3. Contracts
+- Both switches default to `0`; with all new switches off, `.pos` output must remain byte-identical to the archived pre-change baseline
+- `pos2-slipmw=on` enables MW slip decisions and writes `cycle_slip_mw`; `pos2-arwl=on` may maintain MW smoothing state for AR, but must not mark slips or write MW slip diagnostics by itself
+- MW smoothing may run when either `slipmw` or `arwl` is on, because the same `ssat_t.mwm/mwc` state feeds both detection and AR
+- Wide-lane AR is RTK dual-frequency only: single-frequency, missing L2 pairs, IFLC mode, unsupported systems, short MW lock, fractional-width failure, or ratio failure must fall back to the original full LAMBDA path
+- Wide-lane AR status belongs in trace/error messages only; do not add columns to `epoch_diag.csv` or `sat_diag.csv`
+- GUI state is not authoritative; `rtkpost_qt` must translate `set/slipmw` and `set/arwl` into `prcopt_t` before `postpos()`
+
+### 4. Validation & Error Matrix
+- Config omits `pos2-slipmw` or `pos2-arwl` -> `getsysopts()` supplies `0`
+- `slipmw=off, arwl=off` -> no MW observation path runs, and `.pos` matches the zero-regression baseline byte-for-byte
+- `slipmw=off, arwl=on` -> MW smoothing may update, but `sat_diag.csv` must not contain `cycle_slip_mw`
+- GF-blind L1/L2 cycle-slip injection with `slipmw=off` -> no MW slip diagnostic is expected
+- Same injection with `slipmw=on` -> target satellite/frequencies should produce `cycle_slip_mw`
+- Clean RTK data with `slipmw=on` -> no clean-epoch `cycle_slip_mw` false alarms
+- Wide-lane confidence failure or unsupported mode -> return to original LAMBDA without crashing and without leaving a stale ratio decision
+
+### 5. Good/Base/Bad Cases
+- Good: `rnx2rtkp -p 2 -k arwl_on.conf ...` improves fix ratio, TTFF, or ratio statistics while clean-data ENU RMS does not degrade
+- Base: `rnx2rtkp -p 2 -k all_off.conf ...` compares byte-for-byte against `baseline/p0_*.pos`
+- Bad: `arwl=on` alone sets `ssat[].slip[]` or writes `cycle_slip_mw`
+- Bad: adding a new `sat_diag.csv` column for wide-lane AR instead of using trace output
+
+### 6. Tests Required
+- Option round-trip: save and reload `pos2-slipmw=on` and `pos2-arwl=on`; compile any helper with the same `WIN32`, `TRACE`, `NFREQ`, and constellation macros as the linked RTKLIB objects
+- Zero regression: run the RTK fixtures with both switches off and compare `.pos` against the pre-change baseline with `cmp` or SHA256
+- Detection matrix: clean, GF-blind cycle-slip, and ordinary cycle-slip fixtures with `slipmw` off/on; assert MW hits only where expected and clean false alarms remain zero
+- AR matrix: clean and injected fixtures with `arwl` off/on; assert fix ratio, TTFF, or ratio distribution improves while clean-data RMS does not degrade
+- Tooling: run MATLAB Code Analyzer on `tools/matlab/inject_rinex_fault.m` and `tools/matlab/compare_solutions.m`, and archive metrics/figures under the task artifacts
+- GUI: rebuild `app/qtapp/RTKLib.pro` and `app/qtapp/rtkpost_qt/rtkpost_qt.pro`; confirm the executable contains `set/slipmw`, `set/arwl`, `pos2-slipmw`, and `pos2-arwl`, then compare a manual/UI-automated GUI run against the equivalent console config when GUI execution is in scope
+
+### 7. Wrong vs Correct
+#### Wrong
+```c
+if (opt->slipmw || opt->arwl) {
+    ssat->slip[0] |= 1; /* arwl-only mode must not mark cycle slips */
+    markdiag(sat,0,RTKDIAG_SLIP_RISK,"cycle_slip_mw");
+}
+```
+#### Correct
+```c
+if (opt->slipmw || opt->arwl) {
+    detslp_mw(rtk,obs,iu[i],ir[i],nav,opt->slipmw);
+}
+```
+
 ---
 
 ## Common Mistakes
