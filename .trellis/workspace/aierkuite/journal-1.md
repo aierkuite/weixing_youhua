@@ -237,3 +237,37 @@ Added backend-only rnx2rtkp observation diagnostics with diagnostic CSV output, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: MW周跳检测与宽巷辅助AR
+
+**Date**: 2026-06-14
+**Task**: MW周跳检测与宽巷辅助AR
+**Branch**: `feature/third`
+
+### Summary
+
+为RTK相对定位新增MW宽巷周跳检测和宽巷辅助AR，补齐MATLAB注入/指标工具与rtkpost_qt选项映射；完成零回归、console/Qt构建、MATLAB静态分析和spec契约更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da7515d` | (see git log) |
+| `3bcf886` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

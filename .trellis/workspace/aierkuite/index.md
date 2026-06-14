@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-06-13
+- **Total Sessions**: 8
+- **Last Active**: 2026-06-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~275 | Active |
+| `journal-1.md` | ~273 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-06-14 | MW周跳检测与宽巷辅助AR | `da7515d`, `3bcf886` | `feature/third` |
 | 7 | 2026-06-13 | Hatch 平滑与抗差分组修复 | `25fde6b`, `5fd0027` | `main` |
 | 6 | 2026-06-12 | 质量闭环自适应定权 P1c 收尾与交付 | `bb0da87` | `main` |
 | 5 | 2026-06-11 | 质量闭环自适应定权——任务创建与 AC-0 基线 | `-` | `main` |
