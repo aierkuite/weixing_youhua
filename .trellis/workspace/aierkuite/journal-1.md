@@ -271,3 +271,36 @@ Added backend-only rnx2rtkp observation diagnostics with diagnostic CSV output, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Repository README
+
+**Date**: 2026-06-14
+**Task**: Repository README
+**Branch**: `main`
+
+### Summary
+
+新增根目录 README，补充项目用途、目录结构、Windows 构建运行示例、MATLAB 工具和维护约定，并提交 Claude/Trellis 项目配置。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0194d6f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
