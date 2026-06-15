@@ -27,3 +27,9 @@ RTKLIB-2.5.0/
 
 # 本地计划文件
 plan.md
+
+# 本地工具和会话配置
+.claude/
+.agents/
+.codex/
+.trellis/

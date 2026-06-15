@@ -21,18 +21,18 @@
 
 ```text
 .
+├── .gitignore                           # Git 忽略规则
+├── README.md                            # 仓库说明文档
 ├── RTKLIB-2.4.3-b34/RTKLIB-2.4.3-b34/  # 主要二次开发源码
 │   ├── src/                             # RTKLIB 核心 C 库
 │   ├── app/consapp/rnx2rtkp/            # 后处理命令行入口
 │   ├── app/qtapp/rtkpost_qt/            # Qt 版后处理 GUI
 │   ├── lib/iers/                        # IERS 静态库源码和 makefile
 │   └── test/data/                       # RTKLIB 自带测试数据
-├── tools/matlab/                        # 实验注入、指标统计、绘图脚本
-├── baseline/                            # 本地零回归和实验基线产物，通常不提交
-└── plan.md                              # 本地阶段计划文件，通常不提交
+└── tools/matlab/                        # 实验注入、指标统计、绘图脚本
 ```
 
-工作树中可能还会出现 `RTKLIB-2.5.0/`、`RTKLIB_bin-rtklib_2.4.3/`、课程 PDF/DOCX 或 Office 临时锁文件。这些是参考资料或本地材料，不是当前源码开发入口。
+工作树中可能还会出现 `baseline/`、`plan.md`、`RTKLIB-2.5.0/`、`RTKLIB_bin-rtklib_2.4.3/`、课程 PDF/DOCX 或 Office 临时锁文件。这些是参考资料、实验产物或本地材料，不是当前远端仓库结构的一部分。
 
 ## 环境要求
 
