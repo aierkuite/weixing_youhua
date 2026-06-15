@@ -29,8 +29,6 @@
 │   └── test/data/                       # RTKLIB 自带测试数据
 ├── tools/matlab/                        # 实验注入、指标统计、绘图脚本
 ├── baseline/                            # 本地零回归和实验基线产物，通常不提交
-├── .trellis/                            # Trellis 任务、规范和会话记录
-├── AGENTS.md                            # 本仓库 AI 协作约束
 └── plan.md                              # 本地阶段计划文件，通常不提交
 ```
 
@@ -173,7 +171,7 @@ fc /b baseline\rtk_0759.pos path\to\new_rtk_0759.pos
 * 新增 RTKLIB 公共函数沿用原项目 banner 注释风格
 * 新增 C/MATLAB 代码注释使用中文，并说明函数作用、参数和返回值
 * 不提交 `.exe`、`.o`、`.pos`、`.trace`、诊断 CSV、`baseline/` 产物、课程资料原件和本地临时文件
-* 工作前优先查看 `.trellis/spec/` 与当前任务 PRD，避免破坏已有零回归约束
+* 修改算法或配置读写逻辑前，先明确零回归样例和对比指标，避免破坏默认关闭开关下的原始行为
 
 ## 许可证
 

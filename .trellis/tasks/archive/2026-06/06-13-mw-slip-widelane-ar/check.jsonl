@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查依据：零回归（slipmw=off+arwl=off 逐字节）与既有功能（diag CSV、SNR/IGG3 定权、Hatch 平滑）不受影响；两开关全关即上阶段结束状态"}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查依据：pos2-slipmw/pos2-arwl 配置往返一致、实验复跑命令路径反斜杠与 -p 2 显式模式、实验须开 AR(armode=continuous/fix-hold)"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查依据：宽巷置信不足/级联失败回退原版 LAMBDA 的退化正确性；IFLC 与宽巷 AR 互斥、单频/无双频 DD 不参与宽巷约束的 edge 处理"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查依据：Qt 构建目标、slipmw/arwl 复选框保存设置与事件接线、核心/UI 分离、默认 off 时 GUI 行为不变"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流检查：pos2-slipmw/arwl 配置 ↔ Qt 复选框 ↔ prcopt_t.slipmw/arwl ↔ detslp_mw/宽巷级联行为 ↔ sat_diag.csv reason(cycle_slip_mw)/报表的一致性；MW 平滑态 mwm/mwc 被 P1 检测与 P2 宽巷 AR 两方共用的一致性"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用检查：mwobs 复用 sdobs（不重写单差）、detslp_mw 仿 detslp_gf、markdiag 复用写 cycle_slip_mw、Qt 持久化沿用上任务 set/ 模式——勿重复造轮子"}

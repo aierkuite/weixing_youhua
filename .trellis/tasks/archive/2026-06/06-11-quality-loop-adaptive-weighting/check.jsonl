@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查依据：API 兼容、回归目标——核对开关全关零回归与既有功能不受影响"}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查依据：选项表写法、配置往返（loadopts/saveopts）、生成文件（CSV 追加列向后兼容）"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查依据：GUI 构建目标、保存设置、事件接线与核心/UI 分离（P1c）"}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流检查：console 选项 ↔ Qt 设置 ↔ prcopt_t ↔ 诊断 CSV 的一致性"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用检查：IGG-III 权函数在 rtkpos/pntpos 两处复用、QSettings 模式沿用上任务实现"}
