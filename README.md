@@ -32,7 +32,6 @@
 └── tools/matlab/                        # 实验注入、指标统计、绘图脚本
 ```
 
-工作树中可能还会出现 `baseline/`、`plan.md`、`RTKLIB-2.5.0/`、`RTKLIB_bin-rtklib_2.4.3/`、课程 PDF/DOCX 或 Office 临时锁文件。这些是参考资料、实验产物或本地材料，不是当前远端仓库结构的一部分。
 
 ## 环境要求
 
